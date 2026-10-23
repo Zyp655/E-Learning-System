@@ -1,0 +1,20 @@
+/* ==========================================================================
+   Strongbody / LMS — CSS entry duy nhất
+   Thứ tự: tailwind → token → base → typography → utilities → prose → vendor → animations
+   ========================================================================== */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Site luôn nền sáng: dark: chỉ kích hoạt khi có class .dark (không bao giờ gắn) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@import "./tokens.css";
+@import "./base.css";
+@import "./typography.css";
+@import "./utilities.css";
+@import "./prose.css";
+@import "./vendor.css";
+@import "./sheet.css";
+@import "./focus.css";
+@import "./animations.css";

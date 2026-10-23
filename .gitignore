@@ -1,0 +1,30 @@
+# OS & Editor
+.DS_Store
+.idea/
+.vscode/
+
+# Dependencies & Builds
+node_modules/
+.next/
+build/
+dist/
+bin/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# ML Datasets & Large Checkpoints
+ml/data/
+ml/frames/
+*.pth
+*.pt
+*.npz
+
+# Local Dev Databases & Uploads
+*.db
+*.db-shm
+*.db-wal
+lms-api/uploads/

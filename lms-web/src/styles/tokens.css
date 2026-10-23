@@ -1,0 +1,210 @@
+/* ==========================================================================
+   Strongbody Design Tokens
+   Nguồn sự thật duy nhất cho màu, font, cỡ chữ, radius, shadow, layout.
+   Tài liệu & quy ước dùng: DESIGN_SYSTEM.md
+   ========================================================================== */
+
+@theme {
+  /* ---------- Font: chỉ Plus Jakarta Sans ----------
+     Fallback hệ thống chỉ để hiển thị các hệ chữ Jakarta không hỗ trợ
+     (ar, hi, ja, ko, th, zh). serif/mono trỏ về cùng stack. */
+  --font-sans:
+    var(--font-jakarta), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Noto Sans", sans-serif;
+  --font-serif: var(--font-sans);
+  --font-mono: var(--font-sans);
+
+
+  /* ---------- Typography semantic ----------
+     Giá trị mobile; bản desktop (md+) override trong typography.css.
+     Scale số (text-xs…text-6xl) giữ mặc định Tailwind. */
+  --text-display: 2.25rem;
+  --text-display--line-height: 2.75rem;
+  --text-display--font-weight: 700;
+  --text-display--letter-spacing: -0.02em;
+
+  --text-h1: 1.875rem;
+  --text-h1--line-height: 2.375rem;
+  --text-h1--font-weight: 700;
+  --text-h1--letter-spacing: -0.02em;
+
+  --text-h2: 1.5rem;
+  --text-h2--line-height: 2rem;
+  --text-h2--font-weight: 700;
+  --text-h2--letter-spacing: -0.01em;
+
+  --text-h3: 1.25rem;
+  --text-h3--line-height: 1.75rem;
+  --text-h3--font-weight: 600;
+
+  --text-h4: 1.125rem;
+  --text-h4--line-height: 1.625rem;
+  --text-h4--font-weight: 600;
+
+  --text-body-lg: 1rem;
+  --text-body-lg--line-height: 1.5rem;
+
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-caption--font-weight: 500;
+
+  /* ---------- Màu chữ ----------
+     secondary/tertiary đủ tương phản trên nền xám muted (#f9fafb): 5.8:1 / 4.1:1. */
+  --color-primary: #111827;
+  --color-secondary: #586474;
+  --color-tertiary: #727b8a;
+  --color-disabled: #c6c6c6;
+  --color-inverse: #ffffff;
+
+  /* ---------- Brand buyer / student (đỏ) ---------- */
+  --color-brand: #da1f27;
+  --color-brand-25: #fff5f6;
+  --color-brand-50: #ffeaee;
+  --color-brand-100: #ffccd1;
+  --color-brand-200: #f49798;
+  --color-brand-300: #eb6e6f;
+  --color-brand-400: #f64b4b;
+  --color-brand-500: #fb372e;
+  --color-brand-600: #ec2b2e;
+  --color-brand-700: #da1f27;
+  --color-brand-800: #cd1521;
+  --color-brand-900: #bf0013;
+
+  /* ---------- Seller / teacher studio (xanh) ---------- */
+  --color-seller: #1c906c;
+  --color-seller-25: #f0f9f6;
+  --color-seller-50: #e0f1ec;
+  --color-seller-100: #b3ddcf;
+  --color-seller-200: #82c8b1;
+  --color-seller-300: #54b193;
+  --color-seller-400: #33a17f;
+  --color-seller-500: #1c906c;
+  --color-seller-600: #198361;
+  --color-seller-700: #147352;
+  --color-seller-800: #0c6445;
+  --color-seller-900: #02482c;
+
+  /* ---------- Navy ---------- */
+  --color-navy: #1f2c43;
+  --color-navy-50: #e8edff;
+  --color-navy-100: #c8d5ee;
+  --color-navy-200: #abb9d6;
+  --color-navy-300: #8d9dbe;
+  --color-navy-400: #7788ab;
+  --color-navy-500: #607499;
+  --color-navy-600: #526688;
+  --color-navy-700: #415371;
+  --color-navy-800: #32405b;
+  --color-navy-900: #1f2c43;
+
+  /* ---------- Chat / AI Tutor & Proactive Intervention (xanh Messenger) ---------- */
+  --color-chat: #0866ff;
+  --color-chat-25: #f5f9ff;
+  --color-chat-50: #ebf3ff;
+  --color-chat-100: #d6e6ff;
+  --color-chat-200: #adcdff;
+  --color-chat-600: #0759e0;
+  --color-chat-700: #064bbd;
+  --color-chat-800: #053d99;
+
+  /* ---------- Surface (luôn sáng) ---------- */
+  --color-page: #fafafa;
+  --color-surface: #ffffff;
+  --color-subtle: #f3f4f6;
+  --color-muted: #f9fafb;
+
+  /* ---------- Border ---------- */
+  --color-line: #e5e7eb;
+  --color-line-strong: #d1d5db;
+  --color-line-subtle: #f1f2f4;
+
+  /* ---------- Status ---------- */
+  --color-success: #0caf60;
+  --color-success-50: #e7f7ef;
+  --color-warning: #f59e0b;
+  --color-warning-50: #fef5e7;
+  --color-danger: #dc2626;
+  --color-danger-50: #fef2f2;
+  --color-info: #2f8cf9;
+  --color-info-50: #eaf4fe;
+
+  /* ---------- Alias cho shadcn/ui ---------- */
+  --color-background: var(--color-surface);
+  --color-foreground: var(--color-primary);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-primary);
+  --color-popover: var(--color-surface);
+  --color-popover-foreground: var(--color-primary);
+  --color-muted-foreground: var(--color-secondary);
+  --color-accent: var(--color-subtle);
+  --color-accent-foreground: var(--color-primary);
+  --color-destructive: var(--color-danger);
+  --color-destructive-foreground: var(--color-inverse);
+  --color-border: var(--color-line);
+  --color-input: var(--color-line);
+  --color-ring: var(--color-brand);
+
+  /* Bo góc riêng cho MỌI nút của nền tảng (10px) → class `rounded-button`. */
+  --radius-button: 10px;
+
+  /* ---------- Shadow: 4 mức, mềm ---------- */
+  --shadow-xs: 0 1px 2px 0 rgb(16 24 40 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(16 24 40 / 0.06), 0 1px 2px -1px rgb(16 24 40 / 0.04);
+  --shadow-md: 0 4px 12px -2px rgb(16 24 40 / 0.06), 0 2px 4px -2px rgb(16 24 40 / 0.04);
+  --shadow-lg: 0 12px 28px -6px rgb(16 24 40 / 0.1), 0 4px 8px -4px rgb(16 24 40 / 0.04);
+  /* Bóng đổ sang phải cho thanh điều hướng cố định (sidebar App Shell). */
+  --shadow-side: 4px 0 12px -8px rgb(16 24 40 / 0.08);
+
+  /* ---------- Breakpoint ---------- */
+  --breakpoint-sm: 600px;
+  --breakpoint-md: 728px;
+  --breakpoint-lg: 984px;
+  --breakpoint-xl: 1240px;
+  --breakpoint-2xl: 1920px;
+
+  /* ---------- Container / max-width ---------- */
+  --container-form: 560px;
+  --container-article: 720px;
+  --container-page: 1340px;
+}
+
+/* ==========================================================================
+   Khóa hệ thống: loại bỏ những gì KHÔNG thuộc design system
+   → class tương ứng (bg-slate-100, font-black, text-8xl, shadow-2xl…) không còn được sinh ra.
+   ========================================================================== */
+@theme {
+  --color-slate-*: initial;
+  --color-zinc-*: initial;
+  --color-neutral-*: initial;
+  --color-stone-*: initial;
+  --color-orange-*: initial;
+  --color-yellow-*: initial;
+  --color-lime-*: initial;
+  --color-cyan-*: initial;
+  --color-sky-*: initial;
+  --color-indigo-*: initial;
+  --color-violet-*: initial;
+  --color-fuchsia-*: initial;
+  --color-pink-*: initial;
+  --color-rose-*: initial;
+
+  --font-weight-thin: initial;
+  --font-weight-extralight: initial;
+  --font-weight-light: initial;
+  --font-weight-extrabold: initial;
+  --font-weight-black: initial;
+
+  --text-7xl: initial;
+  --text-8xl: initial;
+  --text-9xl: initial;
+
+  --radius-xs: initial;
+  --radius-4xl: initial;
+
+  --shadow-2xs: initial;
+  --shadow-xl: initial;
+  --shadow-2xl: initial;
+}

@@ -1,0 +1,6 @@
+Variant,Acc_default,AUC,Optimal_Threshold,Acc_optimal,F1_optimal
+Full Model (Baseline),0.6407,0.661,0.55,0.8408,0.2864
+No Aux Features,0.5179,0.571,0.62,0.8559,0.2419
+No Attention,0.5275,0.63,0.56,0.7892,0.245
+No Temporal LSTM,0.3206,0.6087,0.63,0.8924,0.25
+No SE Block,0.6272,0.6193,0.66,0.8873,0.2583

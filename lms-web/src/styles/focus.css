@@ -1,0 +1,56 @@
+/*
+ * Trạng thái focus của MỌI ô nhập (input text, textarea, select, trigger dropdown/combobox):
+ * viền xám đậm (gray-500) + bóng nhẹ — không dùng viền màu.
+ */
+
+:root {
+  --focus-field-border: var(--color-gray-500);
+  --focus-field-shadow: 0 0 0 3px rgb(17 24 39 / 0.06);
+}
+
+:is(
+    input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='submit'], [type='button'], [type='reset'], [type='image'], [type='hidden']),
+    textarea,
+    select,
+    button[role='combobox'],
+    [data-slot='select-trigger']
+  ):is(:focus, :focus-visible, [data-focus], [data-state='open']):not(
+    [aria-invalid='true'],
+    [data-invalid],
+    [class*=' border-red-'],
+    [class^='border-red-'],
+    [class*=' border-danger'],
+    [class^='border-danger']
+  ) {
+  border-color: var(--focus-field-border) !important;
+  outline: none !important;
+}
+
+:is(
+    input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='submit'], [type='button'], [type='reset'], [type='image'], [type='hidden']),
+    textarea,
+    select,
+    button[role='combobox'],
+    [data-slot='select-trigger']
+  ):is(:focus, :focus-visible, [data-focus], [data-state='open'])[class*='border']:not(
+    [aria-invalid='true'],
+    [data-invalid],
+    [class*=' border-red-'],
+    [class^='border-red-'],
+    [class*=' border-danger'],
+    [class^='border-danger'],
+    [class~='border-0'],
+    [class~='border-none'],
+    [class~='border-transparent'],
+    [class*='focus-within:'] *
+  ) {
+  box-shadow: var(--focus-field-shadow) !important;
+}
+
+:is([class*='focus-within:border'], [class*='focus-within:ring'], [class*='focus-within:shadow']):has(
+    :is(input, textarea, select):focus
+  ):not(:has([aria-invalid='true'])) {
+  border-color: var(--focus-field-border) !important;
+  box-shadow: var(--focus-field-shadow) !important;
+  outline: none !important;
+}

@@ -1,0 +1,44 @@
+/* ==========================================================================
+   Typography semantic — mobile-first
+   Utility text-display / text-h1…h4 / text-body-lg / text-body / text-caption
+   được sinh từ token --text-* trong tokens.css (giá trị mobile).
+   Từ md (728px) trở lên: override biến → desktop.
+   Rule: nội dung đọc mobile ≥ 14px, desktop ≥ 16px. text-caption chỉ cho badge/label.
+   ========================================================================== */
+
+@media (width >= 728px) {
+  :root {
+    --text-display: 3.75rem;
+    --text-display--line-height: 4.5rem;
+
+    --text-h1: 3rem;
+    --text-h1--line-height: 3.625rem;
+
+    --text-h2: 2.25rem;
+    --text-h2--line-height: 2.75rem;
+
+    --text-h3: 1.5rem;
+    --text-h3--line-height: 2rem;
+
+    --text-h4: 1.25rem;
+    --text-h4--line-height: 1.75rem;
+
+    --text-body-lg: 1.125rem;
+    --text-body-lg--line-height: 1.75rem;
+
+    --text-body: 1rem;
+    --text-body--line-height: 1.5rem;
+  }
+}
+
+/* Khu tài khoản (/student/*, /teacher/*) trên desktop (≥ lg 984px): chữ tối thiểu 16px. */
+@media (width >= 984px) {
+  html:has([data-desktop-min-text]) {
+    --text-xs: 1rem;
+    --text-xs--line-height: 1.5rem;
+    --text-sm: 1rem;
+    --text-sm--line-height: 1.5rem;
+    --text-caption: 1rem;
+    --text-caption--line-height: 1.5rem;
+  }
+}

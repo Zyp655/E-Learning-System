@@ -1,0 +1,112 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: lms-confusion-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-lms_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-lms_password}
+      POSTGRES_DB: ${DB_NAME:-lms_confusion}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-lms_user} -d ${DB_NAME:-lms_confusion}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: lms-confusion-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: lms-confusion-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+
+  lms-api:
+    build:
+      context: ./lms-api
+      dockerfile: Dockerfile
+    container_name: lms-confusion-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      SERVER_PORT: 8000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-lms_user}
+      DB_PASSWORD: ${DB_PASSWORD:-lms_password}
+      DB_NAME: ${DB_NAME:-lms_confusion}
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET:-lms-confusion-super-secret-jwt-key-2026}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      S3_BUCKET: lms-media
+      MESSAGING_BROKER: postgres
+    ports:
+      - "8000:8000"
+
+  lms-web:
+    build:
+      context: ./lms-web
+      dockerfile: Dockerfile
+    container_name: lms-confusion-web
+    restart: unless-stopped
+    depends_on:
+      - lms-api
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${JWT_SECRET:-lms-confusion-super-secret-jwt-key-2026}
+    ports:
+      - "3000:3000"
+
+  lms-admin:
+    build:
+      context: ./lms-admin
+      dockerfile: Dockerfile
+    container_name: lms-confusion-admin
+    restart: unless-stopped
+    depends_on:
+      - lms-api
+    environment:
+      REACT_APP_API_URL: http://localhost:8000
+      REACT_APP_WEB_URL: http://localhost:3000
+    ports:
+      - "3001:3001"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

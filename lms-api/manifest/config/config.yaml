@@ -1,0 +1,10 @@
+server:
+  address: ":8000"
+  openapiPath: "/api.json"
+  swaggerPath: "/swagger"
+  dumpRouterMap: false
+  clientMaxBodySize: 104857600
+
+logger:
+  level: "all"
+  stdout: true

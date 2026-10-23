@@ -1,0 +1,182 @@
+{
+  "model_comparison": [
+    {
+      "name": "LogisticRegression",
+      "accuracy": 0.9995,
+      "precision": 1.0,
+      "recall": 0.9984984984984985,
+      "f1": 0.9992486851990984,
+      "auc": 1.0
+    },
+    {
+      "name": "RandomForest",
+      "accuracy": 0.9975,
+      "precision": 0.9940209267563528,
+      "recall": 0.9984984984984985,
+      "f1": 0.9962546816479401,
+      "auc": 0.9999898699298999
+    },
+    {
+      "name": "GradientBoosting",
+      "accuracy": 0.9975,
+      "precision": 0.9969924812030075,
+      "recall": 0.9954954954954955,
+      "f1": 0.9962434259954921,
+      "auc": 0.9999673586630109
+    },
+    {
+      "name": "MLP",
+      "accuracy": 0.9985,
+      "precision": 0.9970014992503748,
+      "recall": 0.9984984984984985,
+      "f1": 0.9977494373593399,
+      "auc": 0.9999898699298999
+    }
+  ],
+  "ablation_study": [
+    {
+      "config": "Behavior only",
+      "features": [
+        "pause_count",
+        "avg_pause_duration",
+        "long_pause_count",
+        "rewind_count",
+        "rewind_same_spot",
+        "speed_decrease"
+      ],
+      "n_features": 6,
+      "accuracy": 0.9755,
+      "precision": 0.969558599695586,
+      "recall": 0.9564564564564565,
+      "f1": 0.9629629629629629,
+      "auc": 0.9959130794962879
+    },
+    {
+      "config": "Emotion only",
+      "features": [
+        "confused_ratio",
+        "frustrated_ratio",
+        "emotion_transitions",
+        "neg_emotion_streak"
+      ],
+      "n_features": 4,
+      "accuracy": 0.9855,
+      "precision": 0.9818456883509834,
+      "recall": 0.9744744744744744,
+      "f1": 0.9781461944235117,
+      "auc": 0.9979672325999163
+    },
+    {
+      "config": "Quiz only",
+      "features": [
+        "quiz_score",
+        "quiz_time"
+      ],
+      "n_features": 2,
+      "accuracy": 0.9235,
+      "precision": 0.9077901430842608,
+      "recall": 0.8573573573573574,
+      "f1": 0.8818532818532818,
+      "auc": 0.9611646879263072
+    },
+    {
+      "config": "Behavior + Emotion",
+      "features": [
+        "pause_count",
+        "avg_pause_duration",
+        "long_pause_count",
+        "rewind_count",
+        "rewind_same_spot",
+        "speed_decrease",
+        "confused_ratio",
+        "frustrated_ratio",
+        "emotion_transitions",
+        "neg_emotion_streak"
+      ],
+      "n_features": 10,
+      "accuracy": 0.9955,
+      "precision": 0.9969742813918305,
+      "recall": 0.9894894894894894,
+      "f1": 0.9932177844762623,
+      "auc": 0.9999606052829442
+    },
+    {
+      "config": "Behavior + Quiz",
+      "features": [
+        "pause_count",
+        "avg_pause_duration",
+        "long_pause_count",
+        "rewind_count",
+        "rewind_same_spot",
+        "speed_decrease",
+        "quiz_score",
+        "quiz_time"
+      ],
+      "n_features": 8,
+      "accuracy": 0.989,
+      "precision": 0.9893617021276596,
+      "recall": 0.9774774774774775,
+      "f1": 0.9833836858006042,
+      "auc": 0.9983352918135527
+    },
+    {
+      "config": "Emotion + Quiz",
+      "features": [
+        "confused_ratio",
+        "frustrated_ratio",
+        "emotion_transitions",
+        "neg_emotion_streak",
+        "quiz_score",
+        "quiz_time"
+      ],
+      "n_features": 6,
+      "accuracy": 0.993,
+      "precision": 0.9924471299093656,
+      "recall": 0.9864864864864865,
+      "f1": 0.9894578313253012,
+      "auc": 0.9998154076115096
+    },
+    {
+      "config": "All (Multimodal)",
+      "features": [
+        "pause_count",
+        "avg_pause_duration",
+        "long_pause_count",
+        "rewind_count",
+        "rewind_same_spot",
+        "speed_decrease",
+        "confused_ratio",
+        "frustrated_ratio",
+        "emotion_transitions",
+        "neg_emotion_streak",
+        "quiz_score",
+        "quiz_time"
+      ],
+      "n_features": 12,
+      "accuracy": 0.9975,
+      "precision": 0.9969924812030075,
+      "recall": 0.9954954954954955,
+      "f1": 0.9962434259954921,
+      "auc": 0.9999673586630109
+    }
+  ],
+  "best_model": "LogisticRegression",
+  "best_auc": 1.0,
+  "best_f1": 0.9992486851990984,
+  "dataset_size": 2000,
+  "confused_ratio": 0.333,
+  "feature_names": [
+    "pause_count",
+    "avg_pause_duration",
+    "long_pause_count",
+    "rewind_count",
+    "rewind_same_spot",
+    "speed_decrease",
+    "confused_ratio",
+    "frustrated_ratio",
+    "emotion_transitions",
+    "neg_emotion_streak",
+    "quiz_score",
+    "quiz_time"
+  ]
+}

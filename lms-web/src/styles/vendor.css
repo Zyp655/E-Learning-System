@@ -1,0 +1,10 @@
+/* ==========================================================================
+   Override thư viện bên thứ 3 — Dùng token, không hardcode hex
+   ========================================================================== */
+
+@layer components {
+  .mobile-search-wrapper :is(.absolute, div[class*="absolute"]) {
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+}
