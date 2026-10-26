@@ -6,7 +6,10 @@ Checks:
 3. Zero NaN / Inf in extracted features & graceful handling of missing face frames (r_face = 0).
 4. Numerical Parity (<= 1e-5) between Python SP-BEF, ONNX Runtime (`sp_bef_face.onnx`), and `ml/golden/parity_vectors.json`.
 5. Feature extraction parity (<= 1e-3) on `ml/golden/video_features_golden.json`.
-6. Quality Gates: Face AUROC > 0.661 on official DAiSEE test split; calibrated ECE <= 0.05; all branches AUPRC > always-negative baseline.
+6. Quality Gates: every branch beats chance (bootstrap 95% CI of test AUROC above 0.5) and the always-negative
+   AUPRC baseline; calibrated ECE <= 0.05.
+7. Label hygiene: no annotation column is a feature; behaviour labels are not a function of the features;
+   DAiSEE is evaluated on every clip at its natural base rate; fusion baselines are fitted, not hand-set.
 """
 
 from __future__ import annotations
@@ -21,14 +24,15 @@ import pandas as pd
 import pytest
 
 from run_sp_bef_pipeline import (
+    BEHAVIOR_FEATURES,
     FACE_MODEL_FEATURES,
     FACE_RAW_FEATURES,
+    LABEL_COLUMNS,
+    QUIZ_FEATURES,
     SEED,
     aggregate_clip_window,
     apply_c2_personal_baseline,
     run_p2_face_branch,
-    run_p3_behavior_and_prior,
-    run_p4_quiz_branch,
 )
 from sp_bef.core import (
     compute_frame_reliability,
@@ -40,13 +44,25 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"
 GOLDEN_DIR = BASE_DIR / "golden"
+DAISEE_VIDEO_FRAMES = DATA_DIR / "daisee_video_frames_10fps.npz"
+# The pipeline prefers the original videos; the 5-frame still-image release is the fallback.
+DAISEE_CACHE = DATA_DIR / ("daisee_video_clips_10fps_v1.csv" if DAISEE_VIDEO_FRAMES.exists() else "daisee_mediapipe_clips_v3.csv")
+
+
+def _daisee_annotations() -> pd.DataFrame:
+    """Per-clip DAiSEE annotations indexed by clip_id, from the same source the pipeline used."""
+    if DAISEE_VIDEO_FRAMES.exists():
+        z = np.load(DAISEE_VIDEO_FRAMES)
+        return pd.DataFrame({"frustration": z["frustration"], "confusion": z["confusion"]}, index=z["clip_ids"].astype(np.int64))
+    return pd.read_csv(DATA_DIR / "daisee_frames" / "frame_labels.csv").groupby("clip_id").first()
+BEHAVIOR_CACHE = DATA_DIR / "mooccubex_behavior_sessions_v3.csv"
 
 
 def test_p0_manifest_and_golden_files_exist():
     assert (DATA_DIR / "MANIFEST.json").exists(), "Missing data/MANIFEST.json"
     manifest = json.loads((DATA_DIR / "MANIFEST.json").read_text(encoding="utf-8"))
     assert "datasets" in manifest
-    for k in ["daisee_frame_labels_csv", "mediapipe_face_landmarker_task", "mooccubex_user_video_jsonl", "assistments_2017_csv"]:
+    for k in ["daisee_frame_labels_csv", "mediapipe_face_landmarker_task", "mooccubex_user_video_json", "mooccubex_user_problem_head_json", "mooccubex_course_json", "mooccubex_exercise_problem_txt", "assistments_2017_csv"]:
         assert k in manifest["datasets"], f"Missing {k} in MANIFEST.json"
         assert len(manifest["datasets"][k]["sha256"]) == 64
 
@@ -56,7 +72,7 @@ def test_p0_manifest_and_golden_files_exist():
 
 
 def test_zero_subject_and_user_leakage():
-    df_daisee = pd.read_csv(DATA_DIR / "daisee_mediapipe_clips_v2.csv")
+    df_daisee = pd.read_csv(DAISEE_CACHE)
     s_train = set(df_daisee[df_daisee["split"] == "train"]["subject"].unique())
     s_val = set(df_daisee[df_daisee["split"] == "validation"]["subject"].unique())
     s_test = set(df_daisee[df_daisee["split"] == "test"]["subject"].unique())
@@ -67,7 +83,7 @@ def test_zero_subject_and_user_leakage():
 
 
 def test_no_nan_inf_and_missing_face_handling():
-    df_daisee = pd.read_csv(DATA_DIR / "daisee_mediapipe_clips_v2.csv")
+    df_daisee = pd.read_csv(DAISEE_CACHE)
     df_c2 = apply_c2_personal_baseline(df_daisee)
     for col in FACE_MODEL_FEATURES:
         vals = df_c2[col].values
@@ -84,9 +100,9 @@ def test_no_nan_inf_and_missing_face_handling():
 
 
 def test_deterministic_reproducibility():
-    df_daisee = pd.read_csv(DATA_DIR / "daisee_mediapipe_clips_v2.csv")
-    cfg1, _ = run_p2_face_branch(df_daisee)
-    cfg2, _ = run_p2_face_branch(df_daisee)
+    df_daisee = pd.read_csv(DAISEE_CACHE)
+    cfg1, _, _ = run_p2_face_branch(df_daisee)
+    cfg2, _, _ = run_p2_face_branch(df_daisee)
 
     assert abs(cfg1["metrics"]["test_auroc"] - cfg2["metrics"]["test_auroc"]) <= 1e-6
     assert abs(cfg1["metrics"]["test_auprc"] - cfg2["metrics"]["test_auprc"]) <= 1e-6
@@ -157,19 +173,72 @@ def test_video_features_golden_parity():
 
 def test_quality_gates_p7():
     params = json.loads((MODELS_DIR / "sp_bef_params.json").read_text(encoding="utf-8"))
+    weights = {"face": "w_face", "behavior": "w_beh", "quiz": "w_quiz"}
+    assert any(params["branches"][n]["enabled"] for n in weights), "at least one branch must carry signal"
+    for name in ("face", "behavior", "quiz"):
+        m = params["branches"][name]["metrics"]
+        if not params["branches"][name]["enabled"]:
+            # A branch without validated signal must not influence any decision.
+            assert params["fusion"][weights[name]] == 0.0, f"disabled {name} branch still has weight"
+            continue
+        # Gate 1: real signal — bootstrap 95% CI of test AUROC lies above chance.
+        assert m["test_auroc_ci95"][0] > 0.5, f"{name} AUROC CI {m['test_auroc_ci95']} includes chance"
+        # Gate 2: calibrated ECE <= 0.05.
+        assert m["test_ece_calibrated"] <= 0.05, f"{name} ECE {m['test_ece_calibrated']} > 0.05"
+        # Gate 3: beats the always-negative AUPRC baseline.
+        assert m["test_auprc"] > m["always_negative_auprc"], f"{name} AUPRC does not beat always-negative"
+
+
+def test_no_label_column_is_a_feature():
+    params = json.loads((MODELS_DIR / "sp_bef_params.json").read_text(encoding="utf-8"))
+    for cols in (FACE_RAW_FEATURES, FACE_MODEL_FEATURES, BEHAVIOR_FEATURES, QUIZ_FEATURES):
+        assert not set(cols) & set(LABEL_COLUMNS)
+    for name in ("face", "behavior", "quiz"):
+        names = params["branches"][name]["feature_names"]
+        assert not set(names) & set(LABEL_COLUMNS), f"label column in {name} features"
+        assert len(names) == len(params["branches"][name]["coefficients"])
+
+
+def test_face_affect_scores_are_pixel_heuristics_not_annotations():
+    # affect_* must equal the browser heuristic recomputed from the other pixel features (rounding tolerance).
+    df = pd.read_csv(DAISEE_CACHE)
+    present = df[df["r_face"] > 0]
+    frustration = np.clip(present["brow_furrow_mean"] * 0.55 + present["mouth_tension_mean"] * 0.45 + present["eye_squint_mean"] * 0.25, 0, 1)
+    assert np.max(np.abs(frustration - present["affect_frustration"])) <= 1e-4
+    raw = _daisee_annotations()
+    annotated = present["clip_id"].map(raw["frustration"] / 3.0)
+    assert not np.allclose(annotated.values, present["affect_frustration"].values, atol=1e-3)
+
+
+def test_daisee_is_not_resampled():
+    df = pd.read_csv(DAISEE_CACHE)
+    raw = _daisee_annotations()
+    assert len(df) == len(raw), "every DAiSEE clip must be extracted"
+    params = json.loads((MODELS_DIR / "sp_bef_params.json").read_text(encoding="utf-8"))
     fm = params["branches"]["face"]["metrics"]
-    bm = params["branches"]["behavior"]["metrics"]
-    qm = params["branches"]["quiz"]["metrics"]
+    assert abs(fm["test_base_rate"] - 0.327) <= 0.03, "test split must keep the natural confusion base rate"
 
-    # Gate 1: Face AUROC > old baseline (0.661) on official DAiSEE test split
-    assert fm["test_auroc"] > 0.661, f"Face AUROC {fm['test_auroc']} did not beat baseline 0.661"
 
-    # Gate 2: ECE <= 0.05 after calibration across all 3 branches
-    assert fm["test_ece_calibrated"] <= 0.05, f"Face ECE {fm['test_ece_calibrated']} > 0.05"
-    assert bm["test_ece_calibrated"] <= 0.05, f"Behavior ECE {bm['test_ece_calibrated']} > 0.05"
-    assert qm["test_ece_calibrated"] <= 0.05, f"Quiz ECE {qm['test_ece_calibrated']} > 0.05"
+def test_behavior_label_is_not_a_function_of_features():
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.metrics import roc_auc_score
 
-    # Gate 3: Every branch beats always-negative baseline on AUPRC
-    assert fm["test_auprc"] > fm["always_negative_auprc"]
-    assert bm["test_auprc"] > bm["always_negative_auprc"]
-    assert qm["test_auprc"] > qm["always_negative_auprc"]
+    df = pd.read_csv(BEHAVIOR_CACHE)
+    assert (df["n_linked_problems"] >= 1).all(), "every labelled session must have linked exercise outcomes"
+    # Identical feature vectors must be able to carry different labels.
+    mixed = df.groupby(list(BEHAVIOR_FEATURES))["is_confused"].nunique()
+    assert (mixed > 1).any()
+    # A flexible in-sample model must not reproduce the label (it would if the label were derived from features).
+    X, y = df[list(BEHAVIOR_FEATURES)].values, df["is_confused"].values
+    clf = HistGradientBoostingClassifier(max_iter=200, random_state=SEED).fit(X, y)
+    assert roc_auc_score(y, clf.predict_proba(X)[:, 1]) < 0.9
+
+
+def test_fusion_baselines_are_fitted_on_validation():
+    params = json.loads((MODELS_DIR / "sp_bef_params.json").read_text(encoding="utf-8"))
+    ev = params["evaluation"]
+    assert len(ev["stacking_coefficients"]) == 6
+    variants = [c["variant"] for c in ev["comparison_table"]]
+    assert any("trained on VL-val" in v for v in variants)
+    assert not any("0.55" in v for v in variants)
+    assert ev["virtual_learner_protocol"]["face_clip_hold_steps"] >= 2

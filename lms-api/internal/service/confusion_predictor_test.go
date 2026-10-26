@@ -199,7 +199,8 @@ func TestSPBEF_MissingModalitiesAndNoFakeImputation(t *testing.T) {
 				HasQuiz:          false,
 				FacePresentRatio: 1.0,
 				AvgLuminance:     130.0,
-				ConfusedRatio:    0.50,
+				LLRFace:          0.8,
+				DirectLLRFace:    true,
 				PauseCount:       3,
 				RewindCount:      2,
 				QuizScore:        0.0, // No quiz taken -> must NOT be imputed to 50
@@ -207,6 +208,23 @@ func TestSPBEF_MissingModalitiesAndNoFakeImputation(t *testing.T) {
 			},
 			wantRFace: 1.0,
 			wantRQuiz: 0.0,
+			wantContribQuiz: 0.0,
+		},
+		{
+			name: "HasFace=true without face LLR or face features is treated as missing (no face vector invented from ratios)",
+			features: MultimodalFeatures{
+				HasFace:          true,
+				HasQuiz:          false,
+				FacePresentRatio: 1.0,
+				AvgLuminance:     130.0,
+				ConfusedRatio:    0.90,
+				FrustratedRatio:  0.70,
+				EyeLocked:        true,
+				PauseCount:       1,
+			},
+			wantRFace:       0.0,
+			wantContribFace: 0.0,
+			wantRQuiz:       0.0,
 			wantContribQuiz: 0.0,
 		},
 		{
@@ -407,11 +425,10 @@ func TestSPBEF_BoundaryValuesAndLLRClipping(t *testing.T) {
 }
 
 func TestSPBEF_HysteresisAndCooldown(t *testing.T) {
+	// The decision rule is tested with fixed thresholds; the shipped thresholds are tuned by the ML pipeline.
 	cfg := GetConfusionPredictor().SPBEFConfig().Fusion
-	require.InDelta(t, 0.62, cfg.ThetaOn, 1e-6)
-	require.InDelta(t, 0.42, cfg.ThetaOff, 1e-6)
-	require.InDelta(t, 10.0, cfg.MinHoldSec, 1e-6)
-	require.InDelta(t, 180.0, cfg.CooldownSec, 1e-6)
+	cfg.ThetaOn, cfg.ThetaOff, cfg.MinHoldSec, cfg.CooldownSec = 0.62, 0.42, 10.0, 180.0
+	cfg.WFace, cfg.WBeh, cfg.WQuiz = 0.65, 0.85, 0.90
 
 	// Step 1 (t=5s): High evidence -> posterior >= 0.62, high_duration_sec = 5.0 (< min_hold_sec 10.0) -> not yet intervening
 	s1 := SPBEFStep(0.50, 0.35, 3.0, 1.0, 3.0, 1.0, 0.0, 0.0, cfg, 0.0, false, 0.0, 5.0)

@@ -205,8 +205,8 @@ func ValidatePredictConfusionReq(req *v1.PredictConfusionReq) error {
 	if req.DtSec < 0 {
 		return resCode.ValidationFailed.New("dtSec must be >= 0")
 	}
-	if len(req.FaceFeatures) > 0 && len(req.FaceFeatures) != 20 {
-		return resCode.ValidationFailed.New("faceFeatures must have 20 elements")
+	if n := service.GetConfusionPredictor().FaceFeatureCount(); len(req.FaceFeatures) > 0 && len(req.FaceFeatures) != n {
+		return resCode.ValidationFailed.New(fmt.Sprintf("faceFeatures must have %d elements", n))
 	}
 	if len(req.BehaviorFeatures) > 0 {
 		if len(req.BehaviorFeatures) != 6 {

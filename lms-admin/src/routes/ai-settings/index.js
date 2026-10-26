@@ -34,39 +34,39 @@ const { Title, Text } = Typography;
 const LLR_DISTRIBUTION_DATA = [
   {
     key: 'face',
-    branch: '1. Face Branch (DAiSEE · Browser ONNX)',
-    dataset: 'DAiSEE (1,732 train / 530 test clips · 108 subjects)',
-    baseRate: '0.4729',
-    auroc: '0.7367',
-    auprc: '0.7523',
-    ece: '0.0422',
-    meanNegLLR: -0.68,
-    meanPosLLR: +0.84,
-    weightKey: 'w_face = 0.65',
+    branch: '1. Face Branch (DAiSEE video 10 fps · Browser LR)',
+    dataset: 'DAiSEE (5,411 train / 1,703 test clips · 111 subjects)',
+    baseRate: '0.3230',
+    auroc: '0.6207',
+    auprc: '0.4185',
+    ece: '0.0346',
+    meanNegLLR: +0.06,
+    meanPosLLR: +0.23,
+    weightKey: 'w_face = 0.70',
   },
   {
     key: 'beh',
-    branch: '2. Behavior + Segment Prior π_s',
-    dataset: 'MOOCCubeX (9,299 train / 1,276 test · 1,277 users)',
-    baseRate: '0.3404',
-    auroc: '0.8459',
-    auprc: '0.8320',
-    ece: '0.0279',
-    meanNegLLR: -1.18,
-    meanPosLLR: +1.42,
-    weightKey: 'w_beh = 0.85',
+    branch: '2. Behavior (tắt: CI test của AUROC chứa 0.5)',
+    dataset: 'MOOCCubeX (2,482 train / 748 test sessions · 537 users)',
+    baseRate: '0.1644',
+    auroc: '0.5088',
+    auprc: '0.1736',
+    ece: '0.0518',
+    meanNegLLR: -0.03,
+    meanPosLLR: +0.03,
+    weightKey: 'w_beh = 0.00',
   },
   {
     key: 'quiz',
     branch: '3. Quiz Branch (In-Video Segment Quiz)',
-    dataset: 'ASSISTments (54,975 train / 12,121 test · 97 students)',
-    baseRate: '0.1695',
-    auroc: '0.7878',
-    auprc: '0.4563',
-    ece: '0.0366',
-    meanNegLLR: -0.92,
-    meanPosLLR: +1.56,
-    weightKey: 'w_quiz = 0.90',
+    dataset: 'ASSISTments 2017 (652,620 train / 156,451 test · 1,709 students)',
+    baseRate: '0.1831',
+    auroc: '0.7846',
+    auprc: '0.4476',
+    ece: '0.0222',
+    meanNegLLR: -0.71,
+    meanPosLLR: +0.55,
+    weightKey: 'w_quiz = 1.00',
   },
 ];
 
@@ -443,7 +443,7 @@ export default function AiSettings() {
             </Title>
             <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
               Kết quả đánh giá trên tập Test độc lập chủ thể (`train ∩ val ∩ test = ∅`). Hợp nhất SP-BEF trên Virtual Learner đạt{' '}
-              <strong>AUROC = 0.9383, AUPRC = 0.9131, ECE = 0.0655</strong>.
+              <strong>AUROC = 0.6761, AUPRC = 0.4027, ECE = 0.0228</strong> (chi tiết: <code>ml/REPORT_V2.md</code>).
             </Text>
             <Table
               dataSource={LLR_DISTRIBUTION_DATA}

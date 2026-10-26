@@ -80,6 +80,8 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
     recordQuizOutcome,
     submitSelfReport,
     triggerProactiveIntervention,
+    nudgeOpen,
+    respondToConfusionNudge,
   } = useConfusionStore();
 
   const { attachVideoFrame } = useTutorStore();
@@ -92,6 +94,14 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
     lesson.segments[0];
 
   const activeQuizSegment = lesson.segments.find((s) => s.id === activeSegmentQuizId) || null;
+
+  // Quiz branch inputs must match training (ASSISTments): correctness 0/100, seconds on the question, attempts.
+  const quizShownAtRef = useRef<number>(Date.now());
+  const quizAttemptsRef = useRef<number>(0);
+  useEffect(() => {
+    quizShownAtRef.current = Date.now();
+    quizAttemptsRef.current = 0;
+  }, [activeSegmentQuizId]);
 
   // Render high-DPI interactive lecture slide onto canvas so frame capture (GPT-4o Vision RAG) works 100% reliably
   const renderLectureSlide = useCallback(() => {
@@ -264,9 +274,13 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
   const handleSubmitSegmentQuiz = () => {
     if (selectedQuizOption === null || !activeQuizSegment) return;
     const isCorrect = selectedQuizOption === activeQuizSegment.quizQuestion.correctIndex;
+    const now = Date.now();
+    const answerTimeSec = Math.max(1, (now - quizShownAtRef.current) / 1000);
+    quizAttemptsRef.current += 1;
+    quizShownAtRef.current = now;
 
     if (isCorrect) {
-      recordQuizOutcome(100, 14);
+      recordQuizOutcome(100, answerTimeSec, quizAttemptsRef.current);
       setQuizFeedback({
         correct: true,
         message: `Chính xác! ${activeQuizSegment.quizQuestion.explanation}`,
@@ -277,7 +291,7 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
         setSelectedQuizOption(null);
       }, 1400);
     } else {
-      recordQuizOutcome(30, 25);
+      recordQuizOutcome(0, answerTimeSec, quizAttemptsRef.current);
       const outcome = recordSegmentQuizAttempt(
         activeQuizSegment.id,
         false,
@@ -376,6 +390,24 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
               >
                 Đã hiểu
               </button>
+            </div>
+          )}
+
+          {/* Soft SP-BEF prompt: asks the learner instead of opening the tutor automatically */}
+          {nudgeOpen && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-chat-50 px-3.5 py-2.5 text-xs text-chat-700">
+              <div className="flex items-center gap-2">
+                <Icon name="lightBulb" size="sm" className="text-chat" />
+                <span className="font-medium">Đoạn này có khó hiểu không? Trợ lý AI có thể giải thích lại.</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Button size="xs" variant="chat" onClick={() => respondToConfusionNudge(lesson.id, currentTimeSec, true)}>
+                  Giải thích giúp tôi
+                </Button>
+                <Button size="xs" variant="outline" onClick={() => respondToConfusionNudge(lesson.id, currentTimeSec, false)}>
+                  Tôi ổn
+                </Button>
+              </div>
             </div>
           )}
 

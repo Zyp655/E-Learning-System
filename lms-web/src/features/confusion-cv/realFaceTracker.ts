@@ -3,6 +3,7 @@
 import type { EmotionLabel } from '@/api/types';
 import {
   PersonalBaselineCalibrator,
+  FACE_WINDOW_SAMPLE_MS,
   SP_BEF_PARAMS,
   aggregateClipWindow,
   clipVal,
@@ -285,6 +286,10 @@ export class RealFaceTrackerSession {
     return this.baselineCalibrator;
   }
 
+  public getWindowFrameCount(): number {
+    return this.frameWindow.length;
+  }
+
   public reset(): void {
     this.earHistory = [];
     this.noseHistory = [];
@@ -302,7 +307,11 @@ export class RealFaceTrackerSession {
     faceRawProb: number;
     personalBaselineReady: boolean;
   } {
-    this.frameWindow.push({ timestampMs: nowMs, stat });
+    // ~10 fps like the DAiSEE training data (see FACE_WINDOW_SAMPLE_MS).
+    const last = this.frameWindow[this.frameWindow.length - 1];
+    if (!last || nowMs - last.timestampMs >= FACE_WINDOW_SAMPLE_MS) {
+      this.frameWindow.push({ timestampMs: nowMs, stat });
+    }
     this.frameWindow = this.frameWindow.filter((w) => nowMs - w.timestampMs <= 10_000);
 
     if (!stat.detected) {
@@ -335,9 +344,9 @@ export class RealFaceTrackerSession {
     }
 
     this.baselineCalibrator.observe(agg, frameR, nowMs);
-    const faceVec20 = this.baselineCalibrator.build20FaceModelVector(agg, frameR);
+    const faceVec = this.baselineCalibrator.buildFaceModelVector(agg, frameR);
     const { rawProb, calProb, llr } = predictLinearCalibratedBranch(
-      faceVec20,
+      faceVec,
       SP_BEF_PARAMS.branches.face,
     );
 

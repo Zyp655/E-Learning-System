@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	v1 "github.com/hieu/lms-confusion/lms-api/api/confusion/v1"
+	"github.com/hieu/lms-confusion/lms-api/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,8 +98,11 @@ func TestPredictConfusion_ValidationAndSPBEFContributions(t *testing.T) {
 	require.NotNil(t, directRes)
 	assert.InDelta(t, 0.80, directRes.RFace, 1e-5)
 	assert.InDelta(t, 1.80, directRes.LLRFace, 1e-5)
-	assert.InDelta(t, 0.80*0.65*1.80, directRes.ContribFace, 1e-5)
+	wFace := service.GetConfusionPredictor().SPBEFConfig().Fusion.WFace
+	assert.InDelta(t, 0.80*wFace*1.80, directRes.ContribFace, 1e-5)
 	assert.Equal(t, 0.0, directRes.RQuiz, "HasQuiz=false must yield rQuiz=0")
 	assert.Equal(t, 0.0, directRes.ContribQuiz, "HasQuiz=false must yield contribQuiz=0")
-	assert.Greater(t, directRes.PosteriorProb, directRes.PriorProb)
+	// Posterior moves from the prior by exactly the summed evidence contributions (log-odds space).
+	logit := func(p float64) float64 { return math.Log(p / (1 - p)) }
+	assert.InDelta(t, logit(directRes.PriorProb)+directRes.ContribFace+directRes.ContribBeh+directRes.ContribQuiz, logit(directRes.PosteriorProb), 1e-3)
 }

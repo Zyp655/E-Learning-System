@@ -15,7 +15,7 @@ export default function AppFooter() {
         fontSize: 13,
       }}
     >
-      LMS Vision &amp; Proactive AI Tutor Admin Dashboard ©2026 — Powered by GoFrame v2 · pgvector · MediaPipe 478 Landmarks &amp; BiLSTM
+      LMS Vision &amp; Proactive AI Tutor Admin Dashboard ©2026 — Powered by GoFrame v2 · pgvector · MediaPipe 478 Landmarks &amp; SP-BEF
     </Footer>
   );
 }

@@ -458,6 +458,21 @@ function stdPop(arr: number[]): number {
   return Math.sqrt(sumSq / arr.length);
 }
 
+// The face model is trained on DAiSEE sampled at 10 fps (ml/extract_daisee_video_frames.py), so a 10 s face
+// window keeps at most one frame per ~100 ms whatever the camera / requestAnimationFrame rate is (jitter allowed).
+export const FACE_WINDOW_SAMPLE_MS = 95;
+
+/** Greedy ~10 fps subsampling of a time-ordered frame list (first frame kept, then every >= FACE_WINDOW_SAMPLE_MS). */
+export function subsampleFaceWindow<T extends { timestampMs: number }>(frames: readonly T[]): T[] {
+  const out: T[] = [];
+  for (const f of frames) {
+    if (out.length === 0 || f.timestampMs - out[out.length - 1].timestampMs >= FACE_WINDOW_SAMPLE_MS) {
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 /**
  * Aggregates a sequence of frame telemetry dicts into the 15 standardized 10-second Face Window features
  * + C4 Frame Reliability `r_face`. Matches `aggregate_clip_window` in `ml/run_sp_bef_pipeline.py` to <= 1e-6.
@@ -709,33 +724,24 @@ export class PersonalBaselineCalibrator {
     return out;
   }
 
-  public build20FaceModelVector(
+  /**
+   * Builds the face-branch input in the exact order of `SP_BEF_PARAMS.branches.face.feature_names`, so the
+   * runtime always matches whichever feature set the training pipeline selected.
+   */
+  public buildFaceModelVector(
     windowFeatures: AggregatedClipWindow,
     rFace = windowFeatures.r_face,
+    featureNames: readonly string[] = SP_BEF_PARAMS.branches.face.feature_names ?? FACE_MODEL_FEATURES,
   ): number[] {
     const zScores = this.transform(windowFeatures, rFace);
-    return [
-      windowFeatures.brow_furrow_mean,
-      windowFeatures.brow_furrow_std,
-      windowFeatures.brow_furrow_max,
-      windowFeatures.eye_squint_mean,
-      windowFeatures.eye_squint_std,
-      windowFeatures.ear_mean,
-      windowFeatures.ear_std,
-      windowFeatures.mouth_tension_mean,
-      windowFeatures.head_yaw_abs_mean,
-      windowFeatures.head_pitch_abs_mean,
-      windowFeatures.nose_drift_norm,
-      windowFeatures.eye_lock_ratio,
-      windowFeatures.affect_boredom,
-      windowFeatures.affect_engagement,
-      windowFeatures.affect_frustration,
-      zScores.brow_furrow_z,
-      zScores.eye_squint_z,
-      zScores.ear_z,
-      zScores.mouth_tension_z,
-      zScores.affect_frustration_z,
-    ];
+    const values: Record<string, number> = { ...windowFeatures, ...zScores };
+    return featureNames.map((name) => {
+      const v = values[name];
+      if (v === undefined) {
+        throw new Error(`Unknown face feature in sp_bef_params.json: ${name}`);
+      }
+      return Number.isFinite(v) ? v : 0.0;
+    });
   }
 }
 
