@@ -129,7 +129,7 @@ export default function HomePage() {
               </div>
               <div className="flex items-center justify-between rounded-lg bg-white px-3 py-2">
                 <span>Mô hình Phân loại Đa phương thức</span>
-                <span className="font-semibold text-primary">MLP 12 đặc trưng</span>
+                <span className="font-semibold text-primary">SP-BEF (mặt + hành vi + quiz)</span>
               </div>
               <div className="flex items-center justify-between rounded-lg bg-white px-3 py-2">
                 <span>Truy hồi Ngữ cảnh Bài giảng</span>

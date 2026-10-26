@@ -444,15 +444,16 @@ func SPBEFStep(
 	}
 
 	wFace := fusionCfg.WFace
-	if wFace <= 0 {
+	// A weight of exactly 0 disables a branch (set by the ML pipeline when it has no validated signal).
+	if wFace < 0 {
 		wFace = 0.65
 	}
 	wBeh := fusionCfg.WBeh
-	if wBeh <= 0 {
+	if wBeh < 0 {
 		wBeh = 0.85
 	}
 	wQuiz := fusionCfg.WQuiz
-	if wQuiz <= 0 {
+	if wQuiz < 0 {
 		wQuiz = 0.90
 	}
 
@@ -774,24 +775,9 @@ func (p *ConfusionPredictor) ExtractFeatureVector(f MultimodalFeatures) []float6
 	}
 }
 
-func (p *ConfusionPredictor) buildFaceVectorFromSummary(f MultimodalFeatures) []float64 {
-	mean := p.spBEF.Branches.Face.ScalerMean
-	vec := make([]float64, len(mean))
-	copy(vec, mean)
-	if len(vec) >= 20 {
-		eyeLock := f.ConfusedRatio
-		if f.EyeLocked {
-			eyeLock = math.Max(eyeLock, 0.85)
-		}
-		vec[11] = clipVal(eyeLock, 0.0, 1.0)                                // eye_lock_ratio
-		vec[12] = clipVal(f.FrustratedRatio*0.5, 0.0, 1.0)                  // affect_boredom
-		vec[13] = clipVal(1.0-math.Max(f.ConfusedRatio, f.FrustratedRatio), 0.0, 1.0) // affect_engagement
-		vec[14] = clipVal(math.Max(f.ConfusedRatio, f.FrustratedRatio), 0.0, 1.0)     // affect_frustration
-		vec[15] = (f.ConfusedRatio - 0.25) * 3.0                            // brow_furrow_z
-		vec[16] = (f.ConfusedRatio - 0.25) * 2.0                            // eye_squint_z
-		vec[19] = (math.Max(f.ConfusedRatio, f.FrustratedRatio) - 0.20) * 3.0 // affect_frustration_z
-	}
-	return vec
+// FaceFeatureCount is the face-branch input length expected by the loaded sp_bef_params.json.
+func (p *ConfusionPredictor) FaceFeatureCount() int {
+	return len(p.spBEF.Branches.Face.Coefficients)
 }
 
 func (p *ConfusionPredictor) Evaluate(f MultimodalFeatures, mlThreshold, ruleThreshold float64) ConfusionPredictionResult {
@@ -868,8 +854,9 @@ func (p *ConfusionPredictor) Evaluate(f MultimodalFeatures, mlThreshold, ruleThr
 		} else if len(f.FaceFeatures) > 0 {
 			_, _, llrFace = PredictLinearCalibratedBranch(f.FaceFeatures, p.spBEF.Branches.Face)
 		} else {
-			faceVec := p.buildFaceVectorFromSummary(f)
-			_, _, llrFace = PredictLinearCalibratedBranch(faceVec, p.spBEF.Branches.Face)
+			// No face evidence was sent: treat the modality as missing instead of inventing a face vector.
+			rFace = 0.0
+			llrFace = 0.0
 		}
 	}
 
@@ -931,7 +918,8 @@ func (p *ConfusionPredictor) Evaluate(f MultimodalFeatures, mlThreshold, ruleThr
 				if attempts <= 0 {
 					attempts = 1.0
 				}
-				quizVec = []float64{f.QuizScore, f.QuizTime, attempts}
+				// Same ranges as run_p4_quiz_branch(): time clipped to 1..180s, attempts to 1..5.
+				quizVec = []float64{clipVal(f.QuizScore, 0, 100), clipVal(f.QuizTime, 1, 180), clipVal(attempts, 1, 5)}
 			}
 			_, _, llrQuiz = PredictLinearCalibratedBranch(quizVec, p.spBEF.Branches.Quiz)
 		}

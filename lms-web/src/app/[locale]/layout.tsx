@@ -13,7 +13,7 @@ const jakarta = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: 'ALARMM LMS — Nhận diện Bối rối Thị giác Máy tính & Trợ lý AI Giải thích Đa phương thức',
   description:
-    'Hệ thống Quản lý Học tập Thông minh tích hợp MediaPipe 478 Landmarks, MobileFaceNet 192-d, Multimodal MLP 12 đặc trưng và Trợ lý AI RAG 3 tầng.',
+    'Hệ thống Quản lý Học tập Thông minh tích hợp MediaPipe 478 Landmarks, MobileFaceNet 192-d, bộ hợp nhất bằng chứng SP-BEF và Trợ lý AI RAG 3 tầng.',
 };
 
 export default async function LocaleLayout({

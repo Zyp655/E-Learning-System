@@ -8,6 +8,7 @@ Implements Phases P0, P2, P3, P4, P5 of PLAN_V2_CONFUSION.md using 100% Real Pub
 
 from __future__ import annotations
 
+import calendar
 import concurrent.futures
 import hashlib
 import json
@@ -65,6 +66,9 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
 DAISEE_DIR = DATA_DIR / "daisee_frames"
+# Per-frame MediaPipe telemetry of the original DAiSEE videos (written by extract_daisee_video_frames.py).
+DAISEE_VIDEO_FRAMES = DATA_DIR / "daisee_video_frames_10fps.npz"
+DAISEE_VIDEO_LABELS = RAW_DIR / "daisee_video" / "x" / "DAiSEE" / "Labels" / "AllLabels.csv"
 MODELS_DIR = BASE_DIR / "models"
 GOLDEN_DIR = BASE_DIR / "golden"
 OUTPUT_V2_DIR = BASE_DIR / "output_v2"
@@ -110,6 +114,9 @@ BEHAVIOR_FEATURES = [
     "speed_change_down",
 ]
 
+# Annotation columns that must never appear in any feature list (checked by assertions and tests).
+LABEL_COLUMNS = ["is_confused", "confusion_level", "confusion", "boredom", "engagement", "frustration"]
+
 QUIZ_FEATURES = [
     "quiz_accuracy",
     "quiz_time_norm",
@@ -121,9 +128,13 @@ def generate_p0_manifest() -> Dict:
     """P0.2: Compute and save SHA256 checksums for all real datasets and assets."""
     manifest_files = {
         "daisee_frame_labels_csv": DAISEE_DIR / "frame_labels.csv",
+        "daisee_video_all_labels_csv": DAISEE_VIDEO_LABELS,
+        "daisee_video_frames_10fps_npz": DAISEE_VIDEO_FRAMES,
         "mediapipe_face_landmarker_task": RAW_DIR / "face_landmarker.task",
-        "mooccubex_user_video_jsonl": RAW_DIR / "mooccubex_user_video.jsonl",
-        "mooccubex_user_problem_jsonl": RAW_DIR / "mooccubex_user_problem.jsonl",
+        "mooccubex_user_video_json": RAW_DIR / "mooccubex" / "user-video.json",
+        "mooccubex_user_problem_head_json": RAW_DIR / "mooccubex" / "user-problem.head.json",
+        "mooccubex_course_json": RAW_DIR / "mooccubex" / "course.json",
+        "mooccubex_exercise_problem_txt": RAW_DIR / "mooccubex" / "exercise-problem.txt",
         "assistments_2017_csv": RAW_DIR / "anonymized_full_release_competition_dataset.csv",
     }
     records = {}
@@ -135,7 +146,7 @@ def generate_p0_manifest() -> Dict:
                 "sha256": sha256_file(p),
             }
     manifest = {
-        "generated_at": "2026-10-26T09:48:00+07:00",
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "seed": SEED,
         "python_version": "3.11.17",
         "mediapipe_task_version": "0.10.14-float16",
@@ -154,15 +165,17 @@ def _compute_ear(landmarks, indices) -> float:
     return max(0.08, min(0.45, (v1 + v2) / (2.0 * h)))
 
 
-def extract_single_frame_telemetry(landmarker, img_path: str) -> Dict:
+def extract_single_frame_telemetry(landmarker, img_path) -> Dict:
     """
-    Extracts MediaPipe FaceLandmarker 478 landmarks + 52 blendshapes + luminance from a single image file.
+    Extracts MediaPipe FaceLandmarker 478 landmarks + 52 blendshapes + luminance from an image path or a BGR array.
     Matches the exact mathematical definition in `lms-web/src/features/confusion-cv/realFaceTracker.ts`.
     """
-    if not os.path.exists(img_path):
-        return {"detected": False, "luminance": 0.0}
-
-    bgr = cv2.imread(img_path)
+    if isinstance(img_path, np.ndarray):
+        bgr = img_path
+    else:
+        if not os.path.exists(img_path):
+            return {"detected": False, "luminance": 0.0}
+        bgr = cv2.imread(img_path)
     if bgr is None:
         return {"detected": False, "luminance": 0.0}
 
@@ -217,6 +230,7 @@ def extract_single_frame_telemetry(landmarker, img_path: str) -> Dict:
     return {
         "detected": True,
         "luminance": luma,
+        "blendshapes": cats,
         "brow_furrow": brow_furrow,
         "eye_squint": eye_squint,
         "mouth_tension": mouth_tension,
@@ -334,38 +348,78 @@ def _worker_extract_clips(batch_items: List[Tuple]) -> List[Dict]:
     )
     landmarker = mp_vision.FaceLandmarker.create_from_options(opts)
     results = []
-    for clip_id, subject, split, is_confused, confusion_lvl, b_val, e_val, f_val, frame_paths in batch_items:
+    for clip_id, subject, split, is_confused, confusion_lvl, frame_paths in batch_items:
         f_stats = [extract_single_frame_telemetry(landmarker, fp) for fp in frame_paths]
+        # affect_* stay as the heuristic sub-scores computed in aggregate_clip_window (identical to the
+        # browser). DAiSEE's annotated boredom/engagement/frustration are labels, never features.
         agg = aggregate_clip_window(f_stats)
+        valid = [f for f in f_stats if f.get("detected", False)]
+        bs_names = sorted({k for f in valid for k in f["blendshapes"]})
+        for name in bs_names:
+            agg[f"bs_{name}"] = round(float(np.mean([f["blendshapes"].get(name, 0.0) for f in valid])), 6)
         agg["clip_id"] = int(clip_id)
         agg["subject"] = int(subject)
         agg["split"] = str(split)
         agg["is_confused"] = int(is_confused)
         agg["confusion_level"] = int(confusion_lvl)
-        agg["affect_boredom"] = round(float(b_val) / 3.0, 6)
-        agg["affect_engagement"] = round(float(e_val) / 3.0, 6)
-        agg["affect_frustration"] = round(float(f_val) / 3.0, 6)
         results.append(agg)
     landmarker.close()
     return results
 
 
-def build_or_load_daisee_features() -> pd.DataFrame:
-    cache_path = DATA_DIR / "daisee_mediapipe_clips_v2.csv"
-    df_raw = pd.read_csv(DAISEE_DIR / "frame_labels.csv")
-
+def build_daisee_features_from_video() -> pd.DataFrame:
+    """
+    Aggregates the 10 fps per-frame telemetry of every original DAiSEE video into one 10 s face window per clip,
+    with exactly the same aggregate_clip_window() the browser runs on its live frames.
+    """
+    cache_path = DATA_DIR / "daisee_video_clips_10fps_v1.csv"
     if cache_path.exists():
-        df_cached = pd.read_csv(cache_path)
-        if len(df_cached) >= 2000:
-            if "affect_frustration" not in df_cached.columns:
-                clip_meta = df_raw.groupby("clip_id").first()[["boredom", "engagement", "frustration"]]
-                df_cached = df_cached.merge(clip_meta, on="clip_id", how="left")
-                df_cached["affect_boredom"] = (df_cached["boredom"].fillna(0.0) / 3.0).round(6)
-                df_cached["affect_engagement"] = (df_cached["engagement"].fillna(2.0) / 3.0).round(6)
-                df_cached["affect_frustration"] = (df_cached["frustration"].fillna(0.0) / 3.0).round(6)
-                df_cached.drop(columns=["boredom", "engagement", "frustration"], inplace=True, errors="ignore")
-                df_cached.to_csv(cache_path, index=False)
-            return df_cached
+        return pd.read_csv(cache_path)
+
+    z = np.load(DAISEE_VIDEO_FRAMES)
+    col = {n: i for i, n in enumerate(z["columns"])}
+    derived = [n for n in col if n != "detected" and not n.startswith("bs_")]
+    bs_names = [n for n in col if n.startswith("bs_")]
+    frames, offsets = z["frames"], z["offsets"]
+    rows = []
+    for i, clip_id in enumerate(z["clip_ids"]):
+        m = frames[offsets[i] : offsets[i + 1]]
+        det = m[:, col["detected"]] > 0
+        f_stats = [
+            {"detected": bool(d), **{k: float(r[col[k]]) for k in derived}} for r, d in zip(m, det)
+        ]
+        agg = aggregate_clip_window(f_stats)
+        for name in bs_names:
+            agg[name] = round(float(m[det, col[name]].mean()), 6) if det.any() else 0.0
+        agg["clip_id"] = int(clip_id)
+        agg["subject"] = int(z["subjects"][i])
+        agg["split"] = str(z["splits"][i])
+        agg["is_confused"] = int(z["confusion"][i] >= 1)
+        agg["confusion_level"] = int(z["confusion"][i])
+        rows.append(agg)
+
+    df_clips = pd.DataFrame(rows).sort_values(["split", "subject", "clip_id"]).reset_index(drop=True)
+    df_clips.to_csv(cache_path, index=False)
+    return df_clips
+
+
+def build_or_load_daisee_features() -> pd.DataFrame:
+    """
+    Extracts face-window features for EVERY DAiSEE clip (no per-subject resampling), so the test split keeps
+    its natural confusion base rate. Only clip_id/subject/split/is_confused/confusion_level come from the
+    annotations; every feature column is computed from pixels.
+
+    The original videos (10 fps, ~100 frames per clip) are preferred because they match the browser's 10 s
+    window; the 5-frame-per-clip still-image release is the fallback when the videos are not available.
+    """
+    if DAISEE_VIDEO_FRAMES.exists():
+        return build_daisee_features_from_video()
+
+    cache_path = DATA_DIR / "daisee_mediapipe_clips_v3.csv"
+    if cache_path.exists():
+        return pd.read_csv(cache_path)
+
+    df_raw = pd.read_csv(DAISEE_DIR / "frame_labels.csv")
 
     def resolve_split(p: str) -> str:
         pl = p.lower()
@@ -381,39 +435,18 @@ def build_or_load_daisee_features() -> pd.DataFrame:
     )
 
     clip_groups = []
-    for (split, subject), s_grp in df_raw.groupby(["split", "subject"]):
-        clips_by_id = []
-        for clip_id, c_grp in s_grp.groupby("clip_id"):
-            c_sorted = c_grp.sort_values("rel_path")
-            clips_by_id.append(
-                (
-                    int(clip_id),
-                    int(subject),
-                    str(split),
-                    int(c_sorted["is_confused"].iloc[0]),
-                    int(c_sorted["confusion"].iloc[0]),
-                    float(c_sorted["boredom"].iloc[0]),
-                    float(c_sorted["engagement"].iloc[0]),
-                    float(c_sorted["frustration"].iloc[0]),
-                    list(c_sorted["rel_path"].values),
-                )
+    for clip_id, c_grp in df_raw.groupby("clip_id"):
+        c_sorted = c_grp.sort_values("rel_path")
+        clip_groups.append(
+            (
+                int(clip_id),
+                int(c_sorted["subject"].iloc[0]),
+                str(c_sorted["split"].iloc[0]),
+                int(c_sorted["is_confused"].iloc[0]),
+                int(c_sorted["confusion"].iloc[0]),
+                list(c_sorted["rel_path"].values),
             )
-        clips_by_id.sort(key=lambda x: x[0])
-        if not clips_by_id:
-            continue
-        baseline_clip = clips_by_id[0]
-        rest = clips_by_id[1:]
-        pos = [c for c in rest if c[3] == 1]
-        neg = [c for c in rest if c[3] == 0]
-        rng = np.random.RandomState(SEED + int(subject) % 10000)
-        if len(pos) > 14:
-            idx = sorted(rng.choice(len(pos), 14, replace=False))
-            pos = [pos[i] for i in idx]
-        if len(neg) > 14:
-            idx = sorted(rng.choice(len(neg), 14, replace=False))
-            neg = [neg[i] for i in idx]
-        selected = [baseline_clip] + sorted(pos + neg, key=lambda x: x[0])
-        clip_groups.extend(selected)
+        )
 
     print(f"[P2] Extracting MediaPipe 0.10.14 features on {len(clip_groups)} clips across {df_raw['subject'].nunique()} subjects...")
     n_workers = min(8, os.cpu_count() or 4)
@@ -424,6 +457,8 @@ def build_or_load_daisee_features() -> pd.DataFrame:
             all_rows.extend(res)
 
     df_clips = pd.DataFrame(all_rows).sort_values(["split", "subject", "clip_id"]).reset_index(drop=True)
+    bs_cols = [c for c in df_clips.columns if c.startswith("bs_")]
+    df_clips[bs_cols] = df_clips[bs_cols].fillna(0.0)
     df_clips.to_csv(cache_path, index=False)
     return df_clips
 
@@ -435,15 +470,6 @@ def apply_c2_personal_baseline(df_clips: pd.DataFrame) -> pd.DataFrame:
     to exclude it from train/val/test evaluation.
     """
     df = df_clips.sort_values(["split", "subject", "clip_id"]).reset_index(drop=True).copy()
-    if "affect_frustration" not in df.columns:
-        df_raw = pd.read_csv(DAISEE_DIR / "frame_labels.csv")
-        clip_meta = df_raw.groupby("clip_id").first()[["boredom", "engagement", "frustration"]]
-        df = df.merge(clip_meta, on="clip_id", how="left")
-        df["affect_boredom"] = (df["boredom"].fillna(0.0) / 3.0).round(6)
-        df["affect_engagement"] = (df["engagement"].fillna(2.0) / 3.0).round(6)
-        df["affect_frustration"] = (df["frustration"].fillna(0.0) / 3.0).round(6)
-        df.drop(columns=["boredom", "engagement", "frustration"], inplace=True, errors="ignore")
-
     df["is_baseline_clip"] = False
 
     z_cols = [
@@ -487,74 +513,98 @@ def fit_isotonic_knots(
     return [round(float(x), 6) for x in grid], [round(float(y), 6) for y in mapped]
 
 
-def run_p2_face_branch(df_raw_clips: pd.DataFrame) -> Tuple[Dict, pd.DataFrame]:
+def bootstrap_auroc_ci(y_true: np.ndarray, y_prob: np.ndarray, n_boot: int = 1000) -> List[float]:
+    """95% percentile bootstrap interval of AUROC (rows resampled with replacement, fixed seed)."""
+    rng = np.random.RandomState(SEED)
+    y_true, y_prob = np.asarray(y_true), np.asarray(y_prob)
+    scores = []
+    for _ in range(n_boot):
+        idx = rng.randint(0, len(y_true), len(y_true))
+        if y_true[idx].min() == y_true[idx].max():
+            continue
+        scores.append(roc_auc_score(y_true[idx], y_prob[idx]))
+    return [round(float(np.percentile(scores, 2.5)), 4), round(float(np.percentile(scores, 97.5)), 4)]
+
+
+def _fit_face_lr(train_df: pd.DataFrame, cols: List[str]) -> Pipeline:
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", LogisticRegression(C=0.08, max_iter=2000, random_state=SEED)),
+    ])
+    pipe.fit(train_df[cols].values.astype(np.float32), train_df["is_confused"].values.astype(int))
+    return pipe
+
+
+def _linear_branch_cfg(pipe: Pipeline, cols: List[str], base_rate: float, xp: List[float], fp: List[float]) -> Dict:
+    scaler_step = pipe.named_steps["scaler"]
+    clf_step = pipe.named_steps["clf"]
+    return {
+        "feature_names": list(cols),
+        "scaler_mean": [round(float(v), 6) for v in scaler_step.mean_],
+        "scaler_scale": [round(float(v), 6) for v in scaler_step.scale_],
+        "coefficients": [round(float(v), 6) for v in clf_step.coef_[0]],
+        "intercept": round(float(clf_step.intercept_[0]), 6),
+        "base_rate": round(float(base_rate), 6),
+        "isotonic_xp": xp,
+        "isotonic_fp": fp,
+    }
+
+
+def _attach_branch_outputs(df: pd.DataFrame, cfg: Dict, suffix: str = "") -> None:
+    cols = cfg["feature_names"]
+    outs = [predict_linear_calibrated_branch(list(row), cfg) for row in df[cols].values.astype(np.float64)]
+    df["cal_prob" + suffix] = [o[1] for o in outs]
+    df["llr" + suffix] = [o[2] for o in outs]
+
+
+def run_p2_face_branch(df_raw_clips: pd.DataFrame) -> Tuple[Dict, pd.DataFrame, pd.DataFrame]:
     """
-    P2: Train Face Branch on DAiSEE (with C2 personal baseline), compare LR / LightGBM / MLP,
-    calibrate on validation ONLY, evaluate ONCE on official DAiSEE test split, and export ONNX.
+    P2: Face branch on DAiSEE (official subject-disjoint splits, natural base rate, no label-derived features).
+    Candidate feature sets (with / without the C2 personal baseline) are compared on VALIDATION only; the
+    selected one is calibrated on validation and evaluated ONCE on the full official test split.
     """
     df_all = apply_c2_personal_baseline(df_raw_clips)
-    # Exclude baseline clip and zero-face clips from modeling
+    # Baseline clip is excluded for every candidate so that all candidates are scored on the same clips.
     df_eval = df_all[(~df_all["is_baseline_clip"]) & (df_all["r_face"] > 0.0)].copy()
 
     train_df = df_eval[df_eval["split"] == "train"].reset_index(drop=True)
     val_df = df_eval[df_eval["split"] == "validation"].reset_index(drop=True)
     test_df = df_eval[df_eval["split"] == "test"].reset_index(drop=True)
 
-    # Assert zero subject leakage (P7 Gate)
     s_tr = set(train_df["subject"].unique())
     s_va = set(val_df["subject"].unique())
     s_te = set(test_df["subject"].unique())
     assert len(s_tr & s_va) == 0 and len(s_tr & s_te) == 0 and len(s_va & s_te) == 0, "Subject leakage!"
+    for cols in (FACE_RAW_FEATURES, FACE_MODEL_FEATURES):
+        assert not set(cols) & set(LABEL_COLUMNS), "Label column used as face feature!"
 
-    X_tr = train_df[FACE_MODEL_FEATURES].values.astype(np.float32)
-    y_tr = train_df["is_confused"].values.astype(int)
-    X_va = val_df[FACE_MODEL_FEATURES].values.astype(np.float32)
     y_va = val_df["is_confused"].values.astype(int)
-    X_te = test_df[FACE_MODEL_FEATURES].values.astype(np.float32)
     y_te = test_df["is_confused"].values.astype(int)
+    base_rate_face = float(train_df["is_confused"].mean())
 
-    # Compare raw-only (no C2 personal baseline) vs Full 20-feature (with C2 personal baseline)
-    scaler_raw = StandardScaler().fit(train_df[FACE_RAW_FEATURES].values)
-    lr_no_c2 = LogisticRegression(C=0.08, max_iter=1000, random_state=SEED)
-    lr_no_c2.fit(scaler_raw.transform(train_df[FACE_RAW_FEATURES].values), y_tr)
-    p_te_no_c2 = lr_no_c2.predict_proba(scaler_raw.transform(test_df[FACE_RAW_FEATURES].values))[:, 1]
-    auroc_no_c2 = float(roc_auc_score(y_te, p_te_no_c2))
-
-    # Candidate 1: Standardized Logistic Regression (exportable to ONNX & deterministic linear LLR)
-    pipe_lr = Pipeline([
-        ("scaler", StandardScaler()),
-        ("clf", LogisticRegression(C=0.08, max_iter=1000, random_state=SEED)),
-    ])
-    pipe_lr.fit(X_tr, y_tr)
-
-    # Candidate 2: LightGBM / HistGradientBoosting (histogram-based GBDT)
-    clf_lgb = HistGradientBoostingClassifier(
-        max_iter=80, max_depth=3, learning_rate=0.05, max_leaf_nodes=7,
-        min_samples_leaf=20, random_state=SEED
-    )
-    clf_lgb.fit(X_tr, y_tr)
-
-    # Candidate 3: Small MLP (<= 50k params)
-    pipe_mlp = Pipeline([
-        ("scaler", StandardScaler()),
-        ("clf", MLPClassifier(hidden_layer_sizes=(32, 16), max_iter=500, alpha=1.0, random_state=SEED)),
-    ])
-    pipe_mlp.fit(X_tr, y_tr)
-
-    candidates = {}
-    for name, model in [("LogisticRegression", pipe_lr), ("LightGBM", clf_lgb), ("SmallMLP", pipe_mlp)]:
-        p_val = model.predict_proba(X_va)[:, 1]
+    candidate_sets = {"raw": list(FACE_RAW_FEATURES), "raw_plus_c2": list(FACE_MODEL_FEATURES)}
+    fitted, candidates = {}, {}
+    for name, cols in candidate_sets.items():
+        pipe = _fit_face_lr(train_df, cols)
+        p_val = pipe.predict_proba(val_df[cols].values.astype(np.float32))[:, 1]
+        fitted[name] = (pipe, cols, p_val)
         candidates[name] = {
             "val_auroc": round(float(roc_auc_score(y_va, p_val)), 4),
             "val_auprc": round(float(average_precision_score(y_va, p_val)), 4),
         }
+    selected = max(candidates, key=lambda k: candidates[k]["val_auroc"])
+    alternative = [k for k in candidates if k != selected][0]
 
-    # Export pipe_lr to ONNX (`sp_bef_face.onnx`) for browser onnxruntime-web
-    initial_type = [("float_input", FloatTensorType([None, len(FACE_MODEL_FEATURES)]))]
+    cfgs = {}
+    for name, (pipe, cols, p_val) in fitted.items():
+        xp, fp = fit_isotonic_knots(p_val, y_va, n_knots=15, shrinkage=0.25)
+        cfgs[name] = _linear_branch_cfg(pipe, cols, base_rate_face, xp, fp)
+
+    pipe_sel, cols_sel, _ = fitted[selected]
     onnx_model = convert_sklearn(
-        pipe_lr,
-        initial_types=initial_type,
-        options={id(pipe_lr.named_steps["clf"]): {"zipmap": False}},
+        pipe_sel,
+        initial_types=[("float_input", FloatTensorType([None, len(cols_sel)]))],
+        options={id(pipe_sel.named_steps["clf"]): {"zipmap": False}},
         target_opset=15,
     )
     onnx_path = MODELS_DIR / "sp_bef_face.onnx"
@@ -563,284 +613,261 @@ def run_p2_face_branch(df_raw_clips: pd.DataFrame) -> Tuple[Dict, pd.DataFrame]:
     web_onnx_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(onnx_path, web_onnx_dir / "sp_bef_face.onnx")
 
-    # Fit Regularized Isotonic Calibration strictly on Validation set (0 test leakage!)
-    p_va_raw = pipe_lr.predict_proba(X_va)[:, 1]
-    xp_face, fp_face = fit_isotonic_knots(p_va_raw, y_va, n_knots=15, shrinkage=0.25)
+    # Single evaluation on the official test split (natural base rate, every clip with a detected face).
+    branch_cfg = cfgs[selected]
+    p_te_raw = pipe_sel.predict_proba(test_df[cols_sel].values.astype(np.float32))[:, 1]
+    p_te_cal = np.array([piecewise_linear_interp(float(p), branch_cfg["isotonic_xp"], branch_cfg["isotonic_fp"]) for p in p_te_raw])
 
-    # Evaluate ONCE on Official DAiSEE Test Split
-    p_te_raw = pipe_lr.predict_proba(X_te)[:, 1]
-    p_te_cal = np.array([piecewise_linear_interp(float(p), xp_face, fp_face) for p in p_te_raw])
-    base_rate_face = float(np.mean(y_tr))
+    pipe_alt, cols_alt, _ = fitted[alternative]
+    p_te_alt = pipe_alt.predict_proba(test_df[cols_alt].values.astype(np.float32))[:, 1]
 
-    test_auroc = float(roc_auc_score(y_te, p_te_cal))
-    test_auprc = float(average_precision_score(y_te, p_te_cal))
-    test_ece_before = compute_ece(y_te, p_te_raw)
-    test_ece_after = compute_ece(y_te, p_te_cal)
-    test_brier = float(brier_score_loss(y_te, p_te_cal))
-    test_f1 = float(f1_score(y_te, (p_te_cal >= 0.45).astype(int)))
-
-    scaler_step = pipe_lr.named_steps["scaler"]
-    clf_step = pipe_lr.named_steps["clf"]
-
-    branch_cfg = {
-        "feature_names": FACE_MODEL_FEATURES,
-        "scaler_mean": [round(float(v), 6) for v in scaler_step.mean_],
-        "scaler_scale": [round(float(v), 6) for v in scaler_step.scale_],
-        "coefficients": [round(float(v), 6) for v in clf_step.coef_[0]],
-        "intercept": round(float(clf_step.intercept_[0]), 6),
-        "base_rate": round(base_rate_face, 6),
-        "isotonic_xp": xp_face,
-        "isotonic_fp": fp_face,
-        "metrics": {
-            "train_clips": len(train_df),
-            "val_clips": len(val_df),
-            "test_clips": len(test_df),
-            "train_subjects": len(s_tr),
-            "val_subjects": len(s_va),
-            "test_subjects": len(s_te),
-            "candidates_val": candidates,
-            "test_auroc_no_c2_baseline": round(auroc_no_c2, 4),
-            "test_auroc": round(test_auroc, 4),
-            "test_auprc": round(test_auprc, 4),
-            "always_negative_auprc": round(float(np.mean(y_te)), 4),
-            "test_f1_at_045": round(test_f1, 4),
-            "test_ece_uncalibrated": round(test_ece_before, 4),
-            "test_ece_calibrated": round(test_ece_after, 4),
-            "test_brier": round(test_brier, 4),
-            "onnx_size_bytes": onnx_path.stat().st_size,
-        },
+    branch_cfg["metrics"] = {
+        "train_clips": len(train_df),
+        "val_clips": len(val_df),
+        "test_clips": len(test_df),
+        "train_subjects": len(s_tr),
+        "val_subjects": len(s_va),
+        "test_subjects": len(s_te),
+        "test_base_rate": round(float(np.mean(y_te)), 4),
+        "selected_feature_set": selected,
+        "candidates_val": candidates,
+        "posthoc_test_auroc_" + alternative: round(float(roc_auc_score(y_te, p_te_alt)), 4),
+        "test_auroc": round(float(roc_auc_score(y_te, p_te_cal)), 4),
+        "test_auroc_ci95": bootstrap_auroc_ci(y_te, p_te_cal),
+        "test_auprc": round(float(average_precision_score(y_te, p_te_cal)), 4),
+        "always_negative_auprc": round(float(np.mean(y_te)), 4),
+        "test_ece_uncalibrated": round(compute_ece(y_te, p_te_raw), 4),
+        "test_ece_calibrated": round(compute_ece(y_te, p_te_cal), 4),
+        "test_brier": round(float(brier_score_loss(y_te, p_te_cal)), 4),
+        "onnx_size_bytes": onnx_path.stat().st_size,
     }
 
-    # Attach calibrated test probabilities & LLR to test_df for P5 Virtual Learner sampling
-    llrs = []
-    for row in X_te:
-        _, _, llr = predict_linear_calibrated_branch(list(row), branch_cfg)
-        llrs.append(llr)
-    test_df["cal_prob"] = p_te_cal
-    test_df["llr"] = llrs
-    return branch_cfg, test_df
+    # Branch outputs for the Virtual Learner protocol: selected model -> llr/cal_prob, C2 variant -> *_c2 / *_raw.
+    for df in (val_df, test_df):
+        _attach_branch_outputs(df, branch_cfg)
+        _attach_branch_outputs(df, cfgs["raw_plus_c2"], "_c2")
+        _attach_branch_outputs(df, cfgs["raw"], "_raw")
+    return branch_cfg, val_df, test_df
 
 
-def run_p3_behavior_and_prior() -> Tuple[Dict, Dict, pd.DataFrame]:
-    """
-    P3: Parse real MOOCCubeX user-video.jsonl & user-problem.jsonl, extract 6 runtime-identical
-    watching behavior features + C3 Segment Prior pi_s from crowd seek-back density.
-    """
-    problem_fail_by_user: Dict[str, List[int]] = {}
-    with open(RAW_DIR / "mooccubex_user_problem.jsonl", "r", encoding="utf-8") as f:
+MOOCCUBEX_DIR = RAW_DIR / "mooccubex"
+BEHAVIOR_LABEL_WINDOW_SEC = 14 * 24 * 3600
+BEHAVIOR_FAIL_RATE_THRESHOLD = 0.5
+CHINA_UTC_OFFSET_SEC = 8 * 3600
+
+
+def session_behavior_features(segs: List[Dict]) -> Dict[str, float]:
+    """6 runtime-identical watching-behaviour features from one user's MOOCCubeX segments of one video."""
+    pause_durations = []
+    rewind_spots = []
+    speed_down = 0
+    for k in range(len(segs)):
+        s_cur = segs[k]
+        sp = float(s_cur.get("start_point", 0.0) or 0.0)
+        spd = float(s_cur.get("speed", 1.0) or 1.0)
+        t_cur = float(s_cur.get("local_start_time", 0.0) or 0.0)
+        if spd < 1.0:
+            speed_down = 1
+        if k == 0:
+            continue
+        s_prev = segs[k - 1]
+        sp_prev = float(s_prev.get("start_point", 0.0) or 0.0)
+        ep_prev = float(s_prev.get("end_point", sp_prev) or sp_prev)
+        spd_prev = max(0.5, float(s_prev.get("speed", 1.0) or 1.0))
+        t_prev = float(s_prev.get("local_start_time", 0.0) or 0.0)
+        if spd < spd_prev:
+            speed_down = 1
+        if sp < ep_prev - 2.0:
+            rewind_spots.append(sp)
+        watch_wall = max(0.0, (ep_prev - sp_prev) / spd_prev)
+        gap = (t_cur - t_prev) - watch_wall
+        if 2.0 <= gap <= 180.0:
+            pause_durations.append(gap)
+
+    rewind_same = 0
+    spots = sorted(rewind_spots)
+    for r_i in range(1, len(spots)):
+        if abs(spots[r_i] - spots[r_i - 1]) <= 30.0:
+            rewind_same = 1
+            break
+    return {
+        "pause_count": float(min(len(pause_durations), 15)),
+        "avg_pause_duration": round(float(min(np.mean(pause_durations), 180.0)) if pause_durations else 0.0, 4),
+        "long_pause_count": float(min(sum(1 for d in pause_durations if d > 10.0), 10)),
+        "rewind_count": float(min(len(rewind_spots), 12)),
+        "rewind_same_spot": float(rewind_same),
+        "speed_change_down": float(speed_down),
+    }
+
+
+def _load_mooccubex_chapter_links() -> Tuple[Dict[str, set], Dict[str, set]]:
+    """Maps video_id and problem_id to the (course_id, top-level chapter) units they belong to."""
+    video_units: Dict[str, set] = {}
+    exercise_units: Dict[str, set] = {}
+    with open(MOOCCUBEX_DIR / "course.json", "r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line:
-                continue
             try:
-                obj = json.loads(line)
-                uid = str(obj.get("user_id", ""))
-                is_corr = int(obj.get("is_correct", 1) or 0)
-                attempts = int(obj.get("attempts", 1) or 1)
-                failed = 1 if (is_corr == 0 or attempts > 1) else 0
-                problem_fail_by_user.setdefault(uid, []).append(failed)
+                course = json.loads(line)
             except Exception:
                 continue
+            cid = course.get("id")
+            for res in course.get("resource", []) or []:
+                rid = str(res.get("resource_id", ""))
+                chapter = str(res.get("chapter", "") or "").split(".")[0]
+                if not chapter:
+                    continue
+                unit = (cid, chapter)
+                if rid.startswith("V_"):
+                    video_units.setdefault(rid, set()).add(unit)
+                elif rid.startswith("Ex_"):
+                    exercise_units.setdefault(rid, set()).add(unit)
+    problem_units: Dict[str, set] = {}
+    with open(MOOCCUBEX_DIR / "exercise-problem.txt", "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) == 2 and parts[0] in exercise_units:
+                problem_units.setdefault(parts[1], set()).update(exercise_units[parts[0]])
+    return video_units, problem_units
 
-    user_fail_rate = {u: float(np.mean(v)) for u, v in problem_fail_by_user.items() if len(v) > 0}
+
+def build_mooccubex_behavior_sessions(max_sessions: int = 120000) -> pd.DataFrame:
+    """
+    Real proxy label (fixed before training, never computed from the behaviour features):
+      is_confused = 1 if the user got >= 50% of the problems of the SAME course chapter wrong, counting only
+      submissions within 14 days after first watching the video. Sessions with no such submissions are dropped.
+    """
+    cache_path = DATA_DIR / "mooccubex_behavior_sessions_v3.csv"
+    if cache_path.exists():
+        return pd.read_csv(cache_path)
+
+    video_units, problem_units = _load_mooccubex_chapter_links()
+
+    # (user, unit) -> list of (submit_ts, is_correct); the downloaded head of user-problem.json may end mid-line.
+    attempts: Dict[Tuple[str, Tuple[str, str]], List[Tuple[float, int]]] = {}
+    with open(MOOCCUBEX_DIR / "user-problem.head.json", "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            units = problem_units.get(str(obj.get("problem_id", "")))
+            if not units or obj.get("is_correct") is None:
+                continue
+            try:
+                # submit_time is wall-clock China time (UTC+8); convert to a UTC epoch like local_start_time.
+                ts = calendar.timegm(time.strptime(obj["submit_time"], "%Y-%m-%d %H:%M:%S")) - CHINA_UTC_OFFSET_SEC
+            except Exception:
+                continue
+            uid = str(obj["user_id"])
+            for unit in units:
+                attempts.setdefault((uid, unit), []).append((ts, int(obj["is_correct"])))
+    users_with_attempts = {u for u, _ in attempts}
 
     sessions = []
-    # Also accumulate 30s bin seek-back & slow-down counts across videos for C3 Segment Prior pi_s
-    bin_rewinds = np.zeros(20, dtype=np.float64)
-    bin_views = np.zeros(20, dtype=np.float64) + 1.0
-
-    with open(RAW_DIR / "mooccubex_user_video.jsonl", "r", encoding="utf-8") as f:
-        for line_idx, line in enumerate(f):
-            line = line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                # Handle partial first line if stream started mid-record
-                continue
+    with open(MOOCCUBEX_DIR / "user-video.json", "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if len(sessions) >= max_sessions:
+                break
             try:
                 obj = json.loads(line)
             except Exception:
                 continue
-
-            uid = str(obj.get("user_id", f"U_{line_idx}"))
-            seq = obj.get("seq", [])
-            for item in seq:
-                vid = str(item.get("video_id", "V_0"))
-                segs = item.get("segment", [])
-                if not segs or len(segs) < 1:
+            uid = str(obj.get("user_id", ""))
+            if uid not in users_with_attempts:
+                continue
+            for item in obj.get("seq", []) or []:
+                vid = str(item.get("video_id", ""))
+                segs = item.get("segment", []) or []
+                if not segs or vid not in video_units:
                     continue
-
-                pause_durations = []
-                rewind_count = 0
-                rewind_spots = []
-                speed_down = 0
-
-                for k in range(len(segs)):
-                    s_cur = segs[k]
-                    sp = float(s_cur.get("start_point", 0.0) or 0.0)
-                    ep = float(s_cur.get("end_point", sp) or sp)
-                    spd = float(s_cur.get("speed", 1.0) or 1.0)
-                    t_cur = float(s_cur.get("local_start_time", 0.0) or 0.0)
-
-                    b_idx = int(min(19, max(0, sp // 30.0)))
-                    bin_views[b_idx] += 1.0
-                    if spd < 1.0:
-                        speed_down = 1
-                        bin_rewinds[b_idx] += 0.5
-
-                    if k > 0:
-                        s_prev = segs[k - 1]
-                        sp_prev = float(s_prev.get("start_point", 0.0) or 0.0)
-                        ep_prev = float(s_prev.get("end_point", sp_prev) or sp_prev)
-                        spd_prev = max(0.5, float(s_prev.get("speed", 1.0) or 1.0))
-                        t_prev = float(s_prev.get("local_start_time", 0.0) or 0.0)
-
-                        if spd < spd_prev:
-                            speed_down = 1
-
-                        # Check rewind (seek backward > 2 seconds)
-                        if sp < ep_prev - 2.0:
-                            rewind_count += 1
-                            rewind_spots.append(sp)
-                            bin_rewinds[b_idx] += 1.0
-
-                        # Check wall-clock pause gap between consecutive segments
-                        watch_wall = max(0.0, (ep_prev - sp_prev) / spd_prev)
-                        gap = (t_cur - t_prev) - watch_wall
-                        if 2.0 <= gap <= 180.0:
-                            pause_durations.append(gap)
-
-                pause_count = len(pause_durations)
-                avg_pause = float(np.mean(pause_durations)) if pause_durations else 0.0
-                long_pause = sum(1 for d in pause_durations if d > 10.0)
-                rewind_same = 0
-                if len(rewind_spots) >= 2:
-                    rewind_spots_sorted = sorted(rewind_spots)
-                    for r_i in range(1, len(rewind_spots_sorted)):
-                        if abs(rewind_spots_sorted[r_i] - rewind_spots_sorted[r_i - 1]) <= 30.0:
-                            rewind_same = 1
-                            break
-
-                # Fixed Proxy Confusion Label definition (P3):
-                # Combines exercise failure rate when linked user exists + objective behavioral struggle index
-                # with realistic observational noise from real MOOC sessions
-                u_fail = user_fail_rate.get(uid, -1.0)
-                struggle_logit = (
-                    -1.65
-                    + 0.42 * min(pause_count, 6)
-                    + 0.025 * min(avg_pause, 90.0)
-                    + 0.55 * min(long_pause, 4)
-                    + 0.78 * min(rewind_count, 5)
-                    + 0.85 * rewind_same
-                    + 0.65 * speed_down
-                    + (0.90 * (u_fail - 0.35) if u_fail >= 0 else 0.0)
-                )
-                # Deterministic pseudo-random realization keyed by (uid, vid) so label is 100% reproducible
-                h_seed = int(hashlib.md5(f"{uid}_{vid}_{ len(segs) }".encode()).hexdigest()[:8], 16)
-                u_rand = (h_seed % 10000) / 10000.0
-                y_proxy = 1 if u_rand < sigmoid(struggle_logit) else 0
-
-                sessions.append({
+                t0 = min(float(sg.get("local_start_time", 0.0) or 0.0) for sg in segs)
+                outcomes = [
+                    c
+                    for unit in video_units[vid]
+                    for ts, c in attempts.get((uid, unit), [])
+                    if t0 <= ts <= t0 + BEHAVIOR_LABEL_WINDOW_SEC
+                ]
+                if not outcomes:
+                    continue
+                fail_rate = 1.0 - float(np.mean(outcomes))
+                row = session_behavior_features(segs)
+                row.update({
                     "user_id": uid,
                     "video_id": vid,
-                    "pause_count": float(min(pause_count, 15)),
-                    "avg_pause_duration": round(float(min(avg_pause, 180.0)), 4),
-                    "long_pause_count": float(min(long_pause, 10)),
-                    "rewind_count": float(min(rewind_count, 12)),
-                    "rewind_same_spot": float(rewind_same),
-                    "speed_change_down": float(speed_down),
-                    "is_confused": int(y_proxy),
+                    "n_linked_problems": len(outcomes),
+                    "is_confused": int(fail_rate >= BEHAVIOR_FAIL_RATE_THRESHOLD),
                 })
-                if len(sessions) >= 12000:
-                    break
-            if len(sessions) >= 12000:
-                break
+                sessions.append(row)
 
-    df_beh = pd.DataFrame(sessions)
-    # Group split strictly by user_id (0 user overlap between train, val, test)
+    df = pd.DataFrame(sessions)
+    df.to_csv(cache_path, index=False)
+    return df
+
+
+def run_p3_behavior_and_prior() -> Tuple[Dict, Dict, pd.DataFrame, pd.DataFrame]:
+    """
+    P3: Behaviour branch on real MOOCCubeX sessions with the chapter-exercise proxy label, split by user.
+    The C3 segment prior ships as a uniform cold-start prior: open data has no per-segment confusion labels,
+    so a position-in-video prior cannot be validated (see REPORT_V2.md).
+    """
+    df_beh = build_mooccubex_behavior_sessions()
+    assert not set(BEHAVIOR_FEATURES) & set(LABEL_COLUMNS + ["n_linked_problems"])
+
     gss1 = GroupShuffleSplit(n_splits=1, test_size=0.30, random_state=SEED)
     tr_idx, temp_idx = next(gss1.split(df_beh, df_beh["is_confused"], groups=df_beh["user_id"]))
     df_tr = df_beh.iloc[tr_idx].reset_index(drop=True)
     df_temp = df_beh.iloc[temp_idx].reset_index(drop=True)
-
     gss2 = GroupShuffleSplit(n_splits=1, test_size=0.50, random_state=SEED)
     va_idx, te_idx = next(gss2.split(df_temp, df_temp["is_confused"], groups=df_temp["user_id"]))
     df_va = df_temp.iloc[va_idx].reset_index(drop=True)
     df_te = df_temp.iloc[te_idx].reset_index(drop=True)
-
     assert len(set(df_tr["user_id"]) & set(df_va["user_id"])) == 0
     assert len(set(df_tr["user_id"]) & set(df_te["user_id"])) == 0
     assert len(set(df_va["user_id"]) & set(df_te["user_id"])) == 0
-
-    X_tr = df_tr[BEHAVIOR_FEATURES].values.astype(np.float32)
-    y_tr = df_tr["is_confused"].values.astype(int)
-    X_va = df_va[BEHAVIOR_FEATURES].values.astype(np.float32)
-    y_va = df_va["is_confused"].values.astype(int)
-    X_te = df_te[BEHAVIOR_FEATURES].values.astype(np.float32)
-    y_te = df_te["is_confused"].values.astype(int)
 
     pipe_lr = Pipeline([
         ("scaler", StandardScaler()),
         ("clf", LogisticRegression(C=1.0, max_iter=1000, random_state=SEED)),
     ])
-    pipe_lr.fit(X_tr, y_tr)
-
-    p_va_raw = pipe_lr.predict_proba(X_va)[:, 1]
+    pipe_lr.fit(df_tr[BEHAVIOR_FEATURES].values.astype(np.float32), df_tr["is_confused"].values.astype(int))
+    y_va = df_va["is_confused"].values.astype(int)
+    y_te = df_te["is_confused"].values.astype(int)
+    p_va_raw = pipe_lr.predict_proba(df_va[BEHAVIOR_FEATURES].values.astype(np.float32))[:, 1]
     xp_beh, fp_beh = fit_isotonic_knots(p_va_raw, y_va, n_knots=15)
-
-    p_te_raw = pipe_lr.predict_proba(X_te)[:, 1]
+    p_te_raw = pipe_lr.predict_proba(df_te[BEHAVIOR_FEATURES].values.astype(np.float32))[:, 1]
     p_te_cal = np.array([piecewise_linear_interp(float(p), xp_beh, fp_beh) for p in p_te_raw])
-    base_rate_beh = float(np.mean(y_tr))
+    base_rate_beh = float(np.mean(df_tr["is_confused"]))
 
-    scaler_step = pipe_lr.named_steps["scaler"]
-    clf_step = pipe_lr.named_steps["clf"]
-
-    beh_cfg = {
-        "feature_names": BEHAVIOR_FEATURES,
-        "scaler_mean": [round(float(v), 6) for v in scaler_step.mean_],
-        "scaler_scale": [round(float(v), 6) for v in scaler_step.scale_],
-        "coefficients": [round(float(v), 6) for v in clf_step.coef_[0]],
-        "intercept": round(float(clf_step.intercept_[0]), 6),
-        "base_rate": round(base_rate_beh, 6),
-        "isotonic_xp": xp_beh,
-        "isotonic_fp": fp_beh,
-        "metrics": {
-            "train_sessions": len(df_tr),
-            "val_sessions": len(df_va),
-            "test_sessions": len(df_te),
-            "unique_users_total": int(df_beh["user_id"].nunique()),
-            "test_auroc": round(float(roc_auc_score(y_te, p_te_cal)), 4),
-            "test_auprc": round(float(average_precision_score(y_te, p_te_cal)), 4),
-            "always_negative_auprc": round(float(np.mean(y_te)), 4),
-            "test_ece_calibrated": round(compute_ece(y_te, p_te_cal), 4),
-            "test_brier": round(float(brier_score_loss(y_te, p_te_cal)), 4),
-        },
+    beh_cfg = _linear_branch_cfg(pipe_lr, list(BEHAVIOR_FEATURES), base_rate_beh, xp_beh, fp_beh)
+    beh_cfg["metrics"] = {
+        "label_definition": "fail rate >= 0.5 on same-chapter problems submitted within 14 days after first watch",
+        "train_sessions": len(df_tr),
+        "val_sessions": len(df_va),
+        "test_sessions": len(df_te),
+        "unique_users_total": int(df_beh["user_id"].nunique()),
+        "test_base_rate": round(float(np.mean(y_te)), 4),
+        "test_auroc": round(float(roc_auc_score(y_te, p_te_cal)), 4),
+        "test_auroc_ci95": bootstrap_auroc_ci(y_te, p_te_cal),
+        "test_auprc": round(float(average_precision_score(y_te, p_te_cal)), 4),
+        "always_negative_auprc": round(float(np.mean(y_te)), 4),
+        "test_ece_calibrated": round(compute_ece(y_te, p_te_cal), 4),
+        "test_brier": round(float(brier_score_loss(y_te, p_te_cal)), 4),
     }
+    for df in (df_va, df_te):
+        _attach_branch_outputs(df, beh_cfg)
 
-    llrs = []
-    for row in X_te:
-        _, _, llr = predict_linear_calibrated_branch(list(row), beh_cfg)
-        llrs.append(llr)
-    df_te["cal_prob"] = p_te_cal
-    df_te["llr"] = llrs
-
-    # C3: Compute Segment Prior pi_s profile across normalized 30s bins from MOOCCubeX seek-back density
-    raw_density = bin_rewinds / np.maximum(bin_views, 1.0)
-    norm_density = (raw_density - np.min(raw_density)) / max(np.ptp(raw_density), 1e-5)
-    # Map normalized crowd rewind density to segment prior probability [0.10 .. 0.42]
-    segment_priors = [round(float(0.10 + 0.32 * d), 4) for d in norm_density]
     prior_cfg = {
+        "source": "uniform_cold_start (no per-segment confusion labels in open data)",
         "cold_start_prior": round(base_rate_beh, 4),
         "bin_duration_sec": 30,
-        "mooccubex_bin_priors_20": segment_priors,
-        "density_to_prior_intercept": -2.15,
-        "density_to_prior_slope": 1.85,
+        "mooccubex_bin_priors_20": [round(base_rate_beh, 4)] * 20,
+        "density_to_prior_intercept": 0.0,
+        "density_to_prior_slope": 0.0,
     }
+    return beh_cfg, prior_cfg, df_va, df_te
 
-    return beh_cfg, prior_cfg, df_te
 
-
-def run_p4_quiz_branch() -> Tuple[Dict, pd.DataFrame]:
+def run_p4_quiz_branch() -> Tuple[Dict, pd.DataFrame, pd.DataFrame]:
     """
     P4: Parse real ASSISTments 2017 CSV (`anonymized_full_release_competition_dataset.csv`),
     keep ONLY LMS-compatible features (`quiz_accuracy`, `quiz_time_norm`, `attempt_count`),
@@ -850,7 +877,6 @@ def run_p4_quiz_branch() -> Tuple[Dict, pd.DataFrame]:
     df_raw = pd.read_csv(
         RAW_DIR / "anonymized_full_release_competition_dataset.csv",
         usecols=use_cols,
-        nrows=80000,
     ).dropna()
 
     df_quiz = pd.DataFrame({
@@ -913,319 +939,317 @@ def run_p4_quiz_branch() -> Tuple[Dict, pd.DataFrame]:
             "test_auprc": round(float(average_precision_score(y_te_th, p_th)), 4),
         }
 
-    scaler_step = pipe_lr.named_steps["scaler"]
-    clf_step = pipe_lr.named_steps["clf"]
+    quiz_cfg = _linear_branch_cfg(pipe_lr, list(QUIZ_FEATURES), base_rate_quiz, xp_quiz, fp_quiz)
+    quiz_cfg["metrics"] = {
+        "label_definition": f"ASSISTments 2017 confidence(CONFUSED) >= {DEFAULT_TH:.2f}",
+        "label_caveat": "confidence(CONFUSED) is itself a detector output built from interaction features "
+        "(correctness, attempts, time), so this branch partly re-learns that detector",
+        "train_rows": len(df_tr),
+        "val_rows": len(df_va),
+        "test_rows": len(df_te),
+        "unique_students_total": int(df_quiz["student_id"].nunique()),
+        "test_base_rate": round(float(np.mean(y_te)), 4),
+        "test_auroc": round(float(roc_auc_score(y_te, p_te_cal)), 4),
+        "test_auroc_ci95": bootstrap_auroc_ci(y_te, p_te_cal),
+        "test_auprc": round(float(average_precision_score(y_te, p_te_cal)), 4),
+        "always_negative_auprc": round(float(np.mean(y_te)), 4),
+        "test_ece_calibrated": round(compute_ece(y_te, p_te_cal), 4),
+        "test_brier": round(float(brier_score_loss(y_te, p_te_cal)), 4),
+        "threshold_sensitivity": sensitivity,
+    }
+    for df in (df_va, df_te):
+        _attach_branch_outputs(df, quiz_cfg)
+    return quiz_cfg, df_va, df_te
 
-    quiz_cfg = {
-        "feature_names": QUIZ_FEATURES,
-        "scaler_mean": [round(float(v), 6) for v in scaler_step.mean_],
-        "scaler_scale": [round(float(v), 6) for v in scaler_step.scale_],
-        "coefficients": [round(float(v), 6) for v in clf_step.coef_[0]],
-        "intercept": round(float(clf_step.intercept_[0]), 6),
-        "base_rate": round(base_rate_quiz, 6),
-        "isotonic_xp": xp_quiz,
-        "isotonic_fp": fp_quiz,
-        "metrics": {
-            "train_rows": len(df_tr),
-            "val_rows": len(df_va),
-            "test_rows": len(df_te),
-            "unique_students_total": int(df_quiz["student_id"].nunique()),
-            "test_auroc": round(float(roc_auc_score(y_te, p_te_cal)), 4),
-            "test_auprc": round(float(average_precision_score(y_te, p_te_cal)), 4),
-            "always_negative_auprc": round(float(np.mean(y_te)), 4),
-            "test_ece_calibrated": round(compute_ece(y_te, p_te_cal), 4),
-            "test_brier": round(float(brier_score_loss(y_te, p_te_cal)), 4),
-            "threshold_sensitivity": sensitivity,
-        },
+
+VL_PROTOCOL = {
+    "n_learners": 300,
+    "n_steps_per_learner": 48,  # 48 x 5s = 4 minutes per virtual session
+    "dt_sec": 5.0,
+    "p_enter_confused": 0.06,
+    "p_keep_confused": 0.80,
+    "face_clip_hold_steps": 2,  # one DAiSEE clip covers 10s -> reused for two 5s steps
+    "behavior_hold_steps": 12,  # behaviour session redrawn on state change or every 60s
+    "quiz_event_rate": 0.15,
+    "missing_camera_rate": 0.30,
+    "degraded_camera_rate": 0.25,
+}
+
+MAX_FALSE_INTERVENTIONS_PER_HOUR = 2.0
+
+BASE_FUSION_CFG = {
+    "hmm_keep_confused": 0.78,
+    "hmm_beta0": 0.04,
+    "hmm_beta1": 0.45,
+    "w_face": 0.65,
+    "w_beh": 0.85,
+    "w_quiz": 0.90,
+    "theta_on": 0.62,
+    "theta_off": 0.42,
+    "min_hold_sec": 10.0,
+    "cooldown_sec": 180.0,
+}
+
+
+def build_virtual_learners(face_df: pd.DataFrame, beh_df: pd.DataFrame, quiz_df: pd.DataFrame, seed: int) -> List[List[Dict]]:
+    """
+    C6 semi-synthetic protocol: latent confusion follows a fixed 2-state Markov chain (independent of pi_s), and
+    each step reuses REAL held-out branch outputs whose label matches the latent state. Evidence is temporally
+    correlated (clips/sessions are held over several steps) so temporal filtering is not credited with
+    averaging independent draws.
+    """
+    cfg = VL_PROTOCOL
+    rng = np.random.RandomState(seed)
+    pools = {
+        name: {y: df[df["is_confused"] == y].reset_index(drop=True) for y in (0, 1)}
+        for name, df in (("face", face_df), ("beh", beh_df), ("quiz", quiz_df))
     }
 
-    llrs = []
-    for row in X_te:
-        _, _, llr = predict_linear_calibrated_branch(list(row), quiz_cfg)
-        llrs.append(llr)
-    df_te["cal_prob"] = p_te_cal
-    df_te["llr"] = llrs
-    return quiz_cfg, df_te
+    def draw(name: str, y: int) -> pd.Series:
+        pool = pools[name][y]
+        return pool.iloc[rng.randint(0, len(pool))]
+
+    trajectories = []
+    for _ in range(cfg["n_learners"]):
+        camera_on = rng.rand() >= cfg["missing_camera_rate"]
+        state, prev_state = 0, -1
+        face_row = beh_row = None
+        face_age = beh_age = 0
+        steps = []
+        for _t in range(cfg["n_steps_per_learner"]):
+            if state == 1:
+                state = 1 if rng.rand() < cfg["p_keep_confused"] else 0
+            else:
+                state = 1 if rng.rand() < cfg["p_enter_confused"] else 0
+            changed = state != prev_state
+            if changed or face_age >= cfg["face_clip_hold_steps"]:
+                face_row, face_age = draw("face", state), 0
+            if changed or beh_age >= cfg["behavior_hold_steps"]:
+                beh_row, beh_age = draw("beh", state), 0
+            face_age += 1
+            beh_age += 1
+            prev_state = state
+
+            step = {
+                "y": int(state),
+                "p_face": float(face_row["cal_prob"]),
+                "llr_face": float(face_row["llr"]),
+                "p_face_alt": float(face_row["cal_prob_alt"]),
+                "llr_face_alt": float(face_row["llr_alt"]),
+                "r_face": float(face_row["r_face"]) if camera_on else 0.0,
+                "p_beh": float(beh_row["cal_prob"]),
+                "llr_beh": float(beh_row["llr"]),
+                "r_beh": 1.0,
+                "p_quiz": 0.0,
+                "llr_quiz": 0.0,
+                "r_quiz": 0.0,
+            }
+            if camera_on and rng.rand() < cfg["degraded_camera_rate"]:
+                # Assumption under test for C4: a low-quality frame yields an uninformative face LLR.
+                step["r_face"] = round(float(rng.uniform(0.10, 0.35)), 4)
+                noisy = clip_val(float(rng.normal(0.0, 2.2)), -LLR_CLIP, LLR_CLIP)
+                step["llr_face"] = step["llr_face_alt"] = noisy
+                step["p_face"] = step["p_face_alt"] = sigmoid(noisy)
+            if rng.rand() < cfg["quiz_event_rate"]:
+                q_row = draw("quiz", state)
+                step.update({"p_quiz": float(q_row["cal_prob"]), "llr_quiz": float(q_row["llr"]), "r_quiz": 1.0})
+            steps.append(step)
+        trajectories.append(steps)
+    return trajectories
+
+
+def _stacking_features(s: Dict) -> List[float]:
+    mf = 1.0 if s["r_face"] > 0 else 0.0
+    mq = 1.0 if s["r_quiz"] > 0 else 0.0
+    return [mf * logit(s["p_face"]), mf, logit(s["p_beh"]), mq * logit(s["p_quiz"]), mq]
+
+
+def run_fusion_variant(trajectories: List[List[Dict]], mode: str, fusion_cfg: Dict, base_rates: Dict, stacker=None) -> Dict:
+    dt_sec = VL_PROTOCOL["dt_sec"]
+    cold_prior = base_rates["behavior"]
+    all_y, all_p, latencies = [], [], []
+    false_alarms, episodes, detected = 0, 0, 0
+    for traj in trajectories:
+        p_prev, high_sec, intervening, cooldown, consec = cold_prior, 0.0, False, 0.0, 0
+        in_ep, ep_start, ep_detected = False, 0, False
+        for t, s in enumerate(traj):
+            y = s["y"]
+            if y == 1 and not in_ep:
+                in_ep, ep_start, ep_detected = True, t, False
+                episodes += 1
+            elif y == 0:
+                in_ep = False
+
+            if mode in ("legacy_3x060", "naive_prob_avg", "stacking"):
+                if mode == "legacy_3x060":
+                    pf = s["p_face"] if s["r_face"] > 0 else 0.5
+                    pq = s["p_quiz"] if s["r_quiz"] > 0 else 0.5
+                    p_t = (pf + s["p_beh"] + pq) / 3.0
+                    consec = consec + 1 if p_t >= 0.60 else 0
+                    fire = consec >= 3
+                else:
+                    if mode == "naive_prob_avg":
+                        ps = [s["p_beh"]] + ([s["p_face"]] if s["r_face"] > 0 else []) + ([s["p_quiz"]] if s["r_quiz"] > 0 else [])
+                        p_t = float(np.mean(ps))
+                    else:
+                        p_t = float(stacker.predict_proba(np.array([_stacking_features(s)]))[0, 1])
+                    fire = p_t >= fusion_cfg["theta_on"]
+                cooldown = max(0.0, cooldown - dt_sec)
+                trig = fire and cooldown <= 0
+                if trig:
+                    cooldown = fusion_cfg["cooldown_sec"]
+            else:
+                rf = s["r_face"]
+                lf, lb, lq = s["llr_face"], s["llr_beh"], s["llr_quiz"]
+                cfg = fusion_cfg
+                prev = p_prev
+                if mode == "no_c4_reliability":
+                    rf = 1.0 if rf > 0 else 0.0
+                elif mode == "alt_face_model":
+                    lf = s["llr_face_alt"]
+                elif mode == "no_c1_llr":
+                    lf = clip_val(logit(s["p_face"]), -LLR_CLIP, LLR_CLIP)
+                    lb = clip_val(logit(s["p_beh"]), -LLR_CLIP, LLR_CLIP)
+                    lq = clip_val(logit(s["p_quiz"]), -LLR_CLIP, LLR_CLIP)
+                elif mode == "no_c5_hmm":
+                    # a_keep == beta makes the predicted prior constant (no memory); theta_off == theta_on and
+                    # min_hold == dt remove the hysteresis.
+                    beta = clip_val(fusion_cfg["hmm_beta0"] + fusion_cfg["hmm_beta1"] * cold_prior, 0.02, 0.65)
+                    cfg = {**fusion_cfg, "hmm_keep_confused": beta, "theta_off": fusion_cfg["theta_on"], "min_hold_sec": dt_sec}
+                res = sp_bef_step(
+                    prev_posterior=prev, segment_prior=cold_prior,
+                    llr_face=lf, r_face=rf, llr_beh=lb, r_beh=s["r_beh"], llr_quiz=lq, r_quiz=s["r_quiz"],
+                    fusion_cfg=cfg, prev_high_sec=high_sec, prev_intervening=intervening,
+                    cooldown_remaining_sec=cooldown, dt_sec=dt_sec,
+                )
+                p_t = res["posterior_prob"]
+                p_prev = p_t
+                high_sec = res["high_duration_sec"]
+                intervening = res["is_confused"]
+                cooldown = res["cooldown_remaining_sec"]
+                trig = res["should_intervene"]
+
+            all_y.append(y)
+            all_p.append(p_t)
+            if trig:
+                if y == 1 and in_ep and not ep_detected:
+                    latencies.append((t - ep_start) * dt_sec)
+                    ep_detected = True
+                    detected += 1
+                elif y == 0:
+                    false_alarms += 1
+
+    y_arr, p_arr = np.array(all_y, dtype=int), np.array(all_p, dtype=np.float64)
+    total_hours = len(all_y) * dt_sec / 3600.0
+    return {
+        "auroc": round(float(roc_auc_score(y_arr, p_arr)), 4),
+        "auprc": round(float(average_precision_score(y_arr, p_arr)), 4),
+        "ece": round(compute_ece(y_arr, p_arr), 4),
+        "brier": round(float(brier_score_loss(y_arr, p_arr)), 4),
+        "episode_recall": round(detected / max(episodes, 1), 4),
+        "mean_detection_latency_sec": round(float(np.mean(latencies)), 2) if latencies else None,
+        "false_interventions_per_hour": round(false_alarms / max(total_hours, 1e-4), 2),
+    }
 
 
 def run_p5_virtual_learner_evaluation(
-    face_cfg: Dict,
-    face_test_df: pd.DataFrame,
-    beh_cfg: Dict,
-    prior_cfg: Dict,
-    beh_test_df: pd.DataFrame,
-    quiz_cfg: Dict,
-    quiz_test_df: pd.DataFrame,
+    face_cfg: Dict, face_val_df: pd.DataFrame, face_test_df: pd.DataFrame,
+    beh_cfg: Dict, beh_val_df: pd.DataFrame, beh_test_df: pd.DataFrame,
+    quiz_cfg: Dict, quiz_val_df: pd.DataFrame, quiz_test_df: pd.DataFrame,
 ) -> Dict:
     """
-    P5 & C6: Virtual Learner Semi-Synthetic Evaluation Protocol.
-    Pairs REAL held-out test samples from DAiSEE, MOOCCubeX, and ASSISTments according to
-    latent 2-state HMM confusion trajectories with missing modalities (30% no camera, 60% no quiz).
-    Evaluates:
-      (a) Legacy Rule ("3 consecutive >= 0.60")
-      (b) Naive Probability Average
-      (c) Logistic Stacking
-      (d) SP-BEF (Full)
-      + Ablations removing C1, C2, C3, C4, C5.
+    P5 & C6: fusion hyper-parameters and the stacking baseline are fitted on VL-val (built from branch
+    validation outputs); every method is then scored once on VL-test (built from branch test outputs).
     """
-    rng = np.random.RandomState(SEED)
+    alt = "c2" if face_cfg["metrics"]["selected_feature_set"] == "raw" else "raw"
+    for df in (face_val_df, face_test_df):
+        df["cal_prob_alt"] = df["cal_prob_" + alt]
+        df["llr_alt"] = df["llr_" + alt]
+    base_rates = {"face": face_cfg["base_rate"], "behavior": beh_cfg["base_rate"], "quiz": quiz_cfg["base_rate"]}
 
-    face_pos = face_test_df[face_test_df["is_confused"] == 1].reset_index(drop=True)
-    face_neg = face_test_df[face_test_df["is_confused"] == 0].reset_index(drop=True)
-    beh_pos = beh_test_df[beh_test_df["is_confused"] == 1].reset_index(drop=True)
-    beh_neg = beh_test_df[beh_test_df["is_confused"] == 0].reset_index(drop=True)
-    quiz_pos = quiz_test_df[quiz_test_df["is_confused"] == 1].reset_index(drop=True)
-    quiz_neg = quiz_test_df[quiz_test_df["is_confused"] == 0].reset_index(drop=True)
-
-    fusion_cfg = {
-        "hmm_keep_confused": 0.78,
-        "hmm_beta0": 0.04,
-        "hmm_beta1": 0.45,
-        "w_face": 0.65,
-        "w_beh": 0.85,
-        "w_quiz": 0.90,
-        "theta_on": 0.62,
-        "theta_off": 0.42,
-        "min_hold_sec": 10.0,
-        "cooldown_sec": 180.0,
+    # Deployment gate: a branch takes part in fusion only if the bootstrap 95% CI of its calibrated AUROC is
+    # above chance on BOTH validation and test. Using the test split here can only remove a branch.
+    enabled = {}
+    for name, cfg_b, df_val in (("face", face_cfg, face_val_df), ("behavior", beh_cfg, beh_val_df), ("quiz", quiz_cfg, quiz_val_df)):
+        ci = bootstrap_auroc_ci(df_val["is_confused"].values, df_val["cal_prob"].values)
+        cfg_b["metrics"]["val_auroc_ci95"] = ci
+        cfg_b["enabled"] = bool(ci[0] > 0.5 and cfg_b["metrics"]["test_auroc_ci95"][0] > 0.5)
+        enabled[name] = cfg_b["enabled"]
+    weight_grid = {
+        name: ((0.4, 0.7, 1.0) if enabled[key] else (0.0,))
+        for name, key in (("w_face", "face"), ("w_beh", "behavior"), ("w_quiz", "quiz"))
     }
 
-    bin_priors = prior_cfg["mooccubex_bin_priors_20"]
-    n_learners = 300
-    n_steps = 24  # 24 steps * 5s = 120s (2 minutes per virtual session)
-    dt_sec = 5.0
+    vl_val = build_virtual_learners(face_val_df, beh_val_df, quiz_val_df, seed=SEED)
+    vl_test = build_virtual_learners(face_test_df, beh_test_df, quiz_test_df, seed=SEED + 1)
 
-    # Generate trajectories
-    trajectories = []
-    for i in range(n_learners):
-        has_cameraSession = rng.rand() >= 0.30  # 30% sessions have camera off
-        state = 0
-        steps = []
-        for t in range(n_steps):
-            pi_s = float(bin_priors[t % len(bin_priors)])
-            # True latent Markov transition
-            if state == 1:
-                state = 1 if rng.rand() < 0.80 else 0
-            else:
-                p_enter = 0.03 + 0.42 * pi_s
-                state = 1 if rng.rand() < p_enter else 0
+    # Tune SP-BEF evidence weights and HMM persistence on VL-val (minimum Brier score).
+    best_cfg, best_brier, tuning = dict(BASE_FUSION_CFG), float("inf"), []
+    for w_face in weight_grid["w_face"]:
+        for w_beh in weight_grid["w_beh"]:
+            for w_quiz in weight_grid["w_quiz"]:
+                for keep in (0.6, 0.78, 0.9):
+                    cfg = {**BASE_FUSION_CFG, "w_face": w_face, "w_beh": w_beh, "w_quiz": w_quiz, "hmm_keep_confused": keep}
+                    brier = run_fusion_variant(vl_val, "sp_bef_full", cfg, base_rates)["brier"]
+                    tuning.append({"w_face": w_face, "w_beh": w_beh, "w_quiz": w_quiz, "hmm_keep_confused": keep, "val_brier": brier})
+                    if brier < best_brier:
+                        best_cfg, best_brier = cfg, brier
 
-            f_row = (face_pos if state == 1 else face_neg).iloc[rng.randint(0, len(face_pos if state == 1 else face_neg))]
-            b_row = (beh_pos if state == 1 else beh_neg).iloc[rng.randint(0, len(beh_pos if state == 1 else beh_neg))]
-            q_row = (quiz_pos if state == 1 else quiz_neg).iloc[rng.randint(0, len(quiz_pos if state == 1 else quiz_neg))]
+    # Intervention threshold chosen on VL-val: highest episode recall with <= MAX_FALSE_INTERVENTIONS_PER_HOUR.
+    theta_choice = None
+    for theta_on in (0.62, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25):
+        cfg = {**best_cfg, "theta_on": theta_on, "theta_off": round(max(0.05, theta_on - 0.15), 2)}
+        r = run_fusion_variant(vl_val, "sp_bef_full", cfg, base_rates)
+        tuning.append({"theta_on": theta_on, "val_episode_recall": r["episode_recall"], "val_false_per_hour": r["false_interventions_per_hour"]})
+        if r["false_interventions_per_hour"] <= MAX_FALSE_INTERVENTIONS_PER_HOUR and (
+            theta_choice is None or r["episode_recall"] > theta_choice[1]
+        ):
+            theta_choice = (cfg, r["episode_recall"])
+    if theta_choice is not None:
+        best_cfg = theta_choice[0]
 
-            # Simulate degraded camera quality on 25% of camera-on frames (dark room / extreme head pose -> noisy face LLR)
-            f_llr_val = float(f_row["llr"])
-            f_prob_val = float(f_row["cal_prob"])
-            if not has_cameraSession:
-                r_face = 0.0
-            elif rng.rand() < 0.25:
-                r_face = round(float(rng.uniform(0.10, 0.35)), 4)
-                f_llr_val = clip_val(float(rng.normal(0.0, 2.2)), -LLR_CLIP, LLR_CLIP)
-                f_prob_val = sigmoid(f_llr_val)
-            else:
-                r_face = float(f_row["r_face"])
+    # Trained stacking baseline (masked logits + availability indicators), fitted on VL-val.
+    X_val = np.array([_stacking_features(s) for traj in vl_val for s in traj])
+    y_val = np.array([s["y"] for traj in vl_val for s in traj])
+    stacker = LogisticRegression(max_iter=1000, random_state=SEED).fit(X_val, y_val)
 
-            has_quiz_step = rng.rand() >= 0.60  # 60% of steps have no quiz event
-            r_quiz = 1.0 if has_quiz_step else 0.0
-            r_beh = 1.0
-
-            steps.append({
-                "y": int(state),
-                "pi_s": pi_s,
-                "p_face": f_prob_val,
-                "llr_face": f_llr_val,
-                "r_face": r_face,
-                "p_beh": float(b_row["cal_prob"]),
-                "llr_beh": float(b_row["llr"]),
-                "r_beh": r_beh,
-                "p_quiz": float(q_row["cal_prob"]),
-                "llr_quiz": float(q_row["llr"]),
-                "r_quiz": r_quiz,
-            })
-        trajectories.append(steps)
-
-    def evaluate_variant(name: str, mode: str) -> Dict:
-        all_y = []
-        all_p = []
-        latencies = []
-        false_alarms = 0
-        total_hours = (n_learners * n_steps * dt_sec) / 3600.0
-
-        for traj in trajectories:
-            p_prev = prior_cfg["cold_start_prior"]
-            high_sec = 0.0
-            intervening = False
-            cooldown = 0.0
-            consec_60 = 0
-
-            # Track onset detection latency for true confusion episodes
-            in_true_episode = False
-            episode_start_t = 0
-            detected_current_ep = False
-
-            for t, s in enumerate(traj):
-                y = s["y"]
-                if y == 1 and not in_true_episode:
-                    in_true_episode = True
-                    episode_start_t = t
-                    detected_current_ep = False
-                elif y == 0 and in_true_episode:
-                    in_true_episode = False
-
-                if mode == "legacy_3x060":
-                    # Naive average with imputed 0.5 when modality missing, trigger on 3 consecutive >= 0.60
-                    pf = s["p_face"] if s["r_face"] > 0 else 0.5
-                    pb = s["p_beh"]
-                    pq = s["p_quiz"] if s["r_quiz"] > 0 else 0.5
-                    p_t = (pf + pb + pq) / 3.0
-                    if p_t >= 0.60:
-                        consec_60 += 1
-                    else:
-                        consec_60 = 0
-                    trig = consec_60 >= 3 and cooldown <= 0
-                    cooldown = max(0.0, cooldown - dt_sec)
-                    if trig:
-                        cooldown = 180.0
-                elif mode == "naive_prob_avg":
-                    active_ps = [s["p_beh"]]
-                    if s["r_face"] > 0:
-                        active_ps.append(s["p_face"])
-                    if s["r_quiz"] > 0:
-                        active_ps.append(s["p_quiz"])
-                    p_t = float(np.mean(active_ps))
-                    trig = p_t >= 0.60 and cooldown <= 0
-                    cooldown = max(0.0, cooldown - dt_sec)
-                    if trig:
-                        cooldown = 180.0
-                elif mode == "stacking":
-                    pf = s["p_face"] if s["r_face"] > 0 else face_cfg["base_rate"]
-                    pb = s["p_beh"]
-                    pq = s["p_quiz"] if s["r_quiz"] > 0 else quiz_cfg["base_rate"]
-                    z = -2.2 + 1.8 * pf + 2.4 * pb + 2.1 * pq
-                    p_t = sigmoid(z)
-                    trig = p_t >= 0.62 and cooldown <= 0
-                    cooldown = max(0.0, cooldown - dt_sec)
-                    if trig:
-                        cooldown = 180.0
-                else:
-                    # SP-BEF or one of its C1..C5 ablations
-                    pi_s = prior_cfg["cold_start_prior"] if mode == "no_c3_prior" else s["pi_s"]
-                    rf = (1.0 if s["r_face"] > 0 else 0.0) if mode == "no_c4_reliability" else s["r_face"]
-                    lf = s["llr_face"]
-                    lb = s["llr_beh"]
-                    lq = s["llr_quiz"]
-
-                    if mode == "no_c1_llr":
-                        # Without base-rate de-biasing (raw logit without subtracting logit(b_m))
-                        lf = clip_val(logit(s["p_face"]), -LLR_CLIP, LLR_CLIP)
-                        lb = clip_val(logit(s["p_beh"]), -LLR_CLIP, LLR_CLIP)
-                        lq = clip_val(logit(s["p_quiz"]), -LLR_CLIP, LLR_CLIP)
-                    elif mode == "no_c2_baseline":
-                        # Degrade face LLR signal-to-noise by removing personal baseline gain
-                        lf = lf * 0.55
-
-                    if mode == "no_c5_hmm":
-                        # Instantaneous step without temporal memory (p_prev reset to pi_s every step)
-                        step_res = sp_bef_step(
-                            prev_posterior=pi_s,
-                            segment_prior=pi_s,
-                            llr_face=lf,
-                            r_face=rf,
-                            llr_beh=lb,
-                            r_beh=s["r_beh"],
-                            llr_quiz=lq,
-                            r_quiz=s["r_quiz"],
-                            fusion_cfg={**fusion_cfg, "hmm_keep_confused": 0.0, "min_hold_sec": 5.0},
-                            prev_high_sec=0.0,
-                            prev_intervening=False,
-                            cooldown_remaining_sec=cooldown,
-                            dt_sec=dt_sec,
-                        )
-                    else:
-                        step_res = sp_bef_step(
-                            prev_posterior=p_prev,
-                            segment_prior=pi_s,
-                            llr_face=lf,
-                            r_face=rf,
-                            llr_beh=lb,
-                            r_beh=s["r_beh"],
-                            llr_quiz=lq,
-                            r_quiz=s["r_quiz"],
-                            fusion_cfg=fusion_cfg,
-                            prev_high_sec=high_sec,
-                            prev_intervening=intervening,
-                            cooldown_remaining_sec=cooldown,
-                            dt_sec=dt_sec,
-                        )
-                    p_t = step_res["posterior_prob"]
-                    p_prev = p_t
-                    high_sec = step_res["high_duration_sec"]
-                    intervening = step_res["is_confused"]
-                    cooldown = step_res["cooldown_remaining_sec"]
-                    trig = step_res["should_intervene"]
-
-                all_y.append(y)
-                all_p.append(p_t)
-
-                if trig:
-                    if y == 1 and in_true_episode and not detected_current_ep:
-                        latencies.append((t - episode_start_t) * dt_sec)
-                        detected_current_ep = True
-                    elif y == 0:
-                        false_alarms += 1
-
-        y_arr = np.array(all_y, dtype=int)
-        p_arr = np.array(all_p, dtype=np.float64)
-        return {
-            "variant": name,
-            "auroc": round(float(roc_auc_score(y_arr, p_arr)), 4),
-            "auprc": round(float(average_precision_score(y_arr, p_arr)), 4),
-            "ece": round(compute_ece(y_arr, p_arr), 4),
-            "brier": round(float(brier_score_loss(y_arr, p_arr)), 4),
-            "mean_detection_latency_sec": round(float(np.mean(latencies)) if latencies else 15.0, 2),
-            "false_interventions_per_hour": round(false_alarms / max(total_hours, 1e-4), 2),
-        }
-
-    comparison = [
-        evaluate_variant("(a) Legacy Rule (3 consecutive >= 0.60)", "legacy_3x060"),
-        evaluate_variant("(b) Naive Probability Average", "naive_prob_avg"),
-        evaluate_variant("(c) Logistic Stacking", "stacking"),
-        evaluate_variant("(d) SP-BEF (Full Proposed)", "sp_bef_full"),
-        evaluate_variant("Ablation: w/o C1 (No Base-Rate LLR De-bias)", "no_c1_llr"),
-        evaluate_variant("Ablation: w/o C2 (No Personal Baseline)", "no_c2_baseline"),
-        evaluate_variant("Ablation: w/o C3 (No Segment Prior pi_s)", "no_c3_prior"),
-        evaluate_variant("Ablation: w/o C4 (No Dynamic Reliability r_face)", "no_c4_reliability"),
-        evaluate_variant("Ablation: w/o C5 (No 2-State HMM & Hysteresis)", "no_c5_hmm"),
+    alt_label = "with C2 personal baseline" if alt == "c2" else "without C2 personal baseline"
+    variants = [
+        ("(a) Legacy Rule (avg, 3 consecutive >= 0.60)", "legacy_3x060"),
+        ("(b) Naive Probability Average", "naive_prob_avg"),
+        ("(c) Logistic Stacking (trained on VL-val)", "stacking"),
+        ("(d) SP-BEF (tuned on VL-val)", "sp_bef_full"),
+        ("Ablation: w/o C1 (raw logit, no base-rate removal)", "no_c1_llr"),
+        (f"Ablation: face model {alt_label}", "alt_face_model"),
+        ("Ablation: w/o C4 (r_face binary)", "no_c4_reliability"),
+        ("Ablation: w/o C5 (no HMM memory / hysteresis)", "no_c5_hmm"),
     ]
+    comparison = []
+    for label, mode in variants:
+        row = run_fusion_variant(vl_test, mode, best_cfg, base_rates, stacker=stacker)
+        comparison.append({"variant": label, **row})
 
-    # Plot comparison bar chart
     plt.figure(figsize=(10, 5))
     labels = [c["variant"] for c in comparison]
-    aurocs = [c["auroc"] for c in comparison]
-    auprcs = [c["auprc"] for c in comparison]
     y_pos = np.arange(len(labels))
-    plt.barh(y_pos - 0.18, aurocs, height=0.35, label="AUROC", color="#0A3150")
-    plt.barh(y_pos + 0.18, auprcs, height=0.35, label="AUPRC", color="#1c906c")
+    plt.barh(y_pos - 0.18, [c["auroc"] for c in comparison], height=0.35, label="AUROC", color="#0A3150")
+    plt.barh(y_pos + 0.18, [c["auprc"] for c in comparison], height=0.35, label="AUPRC", color="#1c906c")
     plt.yticks(y_pos, labels, fontsize=9)
-    plt.xlim(0.5, 1.0)
+    plt.xlim(0.0, 1.0)
     plt.xlabel("Score")
-    plt.title("SP-BEF Virtual Learner Evaluation & Ablation Study (Real Held-Out Test Samples)")
+    plt.title("Virtual Learner (semi-synthetic) — VL-test, hyper-parameters from VL-val")
     plt.legend(loc="lower right")
     plt.tight_layout()
     plt.savefig(OUTPUT_V2_DIR / "sp_bef_ablation_v2.png", dpi=160)
     plt.close()
 
     return {
-        "fusion_config": fusion_cfg,
-        "virtual_learner_protocol": {
-            "n_learners": n_learners,
-            "n_steps_per_learner": n_steps,
-            "dt_sec": dt_sec,
-            "missing_camera_rate": 0.30,
-            "missing_quiz_rate": 0.60,
-            "degraded_camera_rate": 0.25,
-        },
+        "fusion_config": best_cfg,
+        "virtual_learner_protocol": dict(VL_PROTOCOL),
+        "branches_enabled": enabled,
+        "tuning_best_val_brier": best_brier,
+        "tuning_log": tuning,
+        "stacking_coefficients": [round(float(c), 6) for c in stacker.coef_[0]] + [round(float(stacker.intercept_[0]), 6)],
         "comparison_table": comparison,
     }
 
@@ -1247,7 +1271,7 @@ def generate_golden_files(sp_bef_params: Dict, df_raw_clips: pd.DataFrame) -> No
     rng = np.random.RandomState(SEED + 99)
     vectors = []
     for idx in range(20):
-        f_vec = [round(float(x), 4) for x in rng.normal(0.25, 0.15, len(FACE_MODEL_FEATURES))]
+        f_vec = [round(float(x), 4) for x in rng.normal(0.25, 0.15, len(face_cfg["feature_names"]))]
         b_vec = [
             float(rng.randint(0, 6)),
             round(float(rng.uniform(0, 45)), 2),
@@ -1418,79 +1442,117 @@ def generate_golden_files(sp_bef_params: Dict, df_raw_clips: pd.DataFrame) -> No
 
 
 def write_report_v2(manifest: Dict, sp_bef_params: Dict) -> None:
-    fm = sp_bef_params["branches"]["face"]["metrics"]
+    """Writes REPORT_V2.md. Every number and every comparison sentence is derived from sp_bef_params."""
+    face = sp_bef_params["branches"]["face"]
+    fm = face["metrics"]
+    daisee_source = (
+        "video gốc DAiSEE, MediaPipe 10 fps (~100 frame/clip), cùng hàm gộp cửa sổ 10s như trình duyệt"
+        if DAISEE_VIDEO_FRAMES.exists()
+        else "bản ảnh tĩnh DAiSEE, 5 frame/clip"
+    )
     bm = sp_bef_params["branches"]["behavior"]["metrics"]
     qm = sp_bef_params["branches"]["quiz"]["metrics"]
-    comp = sp_bef_params["evaluation"]["comparison_table"]
+    ev = sp_bef_params["evaluation"]
+    comp = {c["variant"]: c for c in ev["comparison_table"]}
+    proto = ev["virtual_learner_protocol"]
+    fus = sp_bef_params["fusion"]
+
+    def fmt_latency(v):
+        return "—" if v is None else f"{v:.1f}s"
 
     comp_rows = "\n".join(
-        f"| {c['variant']} | **{c['auroc']:.4f}** | **{c['auprc']:.4f}** | {c['ece']:.4f} | {c['brier']:.4f} | {c['mean_detection_latency_sec']:.1f}s | {c['false_interventions_per_hour']:.2f}/h |"
-        for c in comp
+        f"| {c['variant']} | {c['auroc']:.4f} | {c['auprc']:.4f} | {c['ece']:.4f} | {c['brier']:.4f} | "
+        f"{c['episode_recall']:.2f} | {fmt_latency(c['mean_detection_latency_sec'])} | {c['false_interventions_per_hour']:.2f} |"
+        for c in ev["comparison_table"]
     )
-
     sens_rows = "\n".join(
         f"| `{k}` | {v['base_rate']:.4f} | {v['test_auroc']:.4f} | {v['test_auprc']:.4f} |"
         for k, v in qm["threshold_sensitivity"].items()
     )
+    cand_rows = "\n".join(
+        f"| `{k}` | {v['val_auroc']:.4f} | {v['val_auprc']:.4f} |" for k, v in fm["candidates_val"].items()
+    )
+    posthoc_key = [k for k in fm if k.startswith("posthoc_test_auroc_")][0]
 
-    report_md = f"""# Báo cáo Thực nghiệm V2 — SP-BEF (Segment-Prior Bayesian Evidence Fusion)
+    sp = comp["(d) SP-BEF (tuned on VL-val)"]
+    findings = []
+    for name in ("(a) Legacy Rule (avg, 3 consecutive >= 0.60)", "(b) Naive Probability Average", "(c) Logistic Stacking (trained on VL-val)"):
+        o = comp[name]
+        verdict = "cao hơn" if sp["auroc"] > o["auroc"] else ("bằng" if sp["auroc"] == o["auroc"] else "thấp hơn")
+        findings.append(
+            f"- So với **{name}**: AUROC SP-BEF {sp['auroc']:.4f} {verdict} {o['auroc']:.4f}; "
+            f"Brier {sp['brier']:.4f} vs {o['brier']:.4f}; can thiệp sai/giờ {sp['false_interventions_per_hour']:.2f} vs {o['false_interventions_per_hour']:.2f}."
+        )
+    for c in ev["comparison_table"]:
+        if c["variant"].startswith("Ablation"):
+            delta = sp["auroc"] - c["auroc"]
+            findings.append(f"- {c['variant']}: ΔAUROC (Full − ablation) = {delta:+.4f}, ΔBrier = {sp['brier'] - c['brier']:+.4f}.")
+    findings_md = "\n".join(findings)
 
-> Ngày xuất báo cáo: 2026-10-26 · Seed cố định: `{SEED}` · Python `3.11.17` (`uv`) · MediaPipe FaceLandmarker `0.10.14 (float16)`
-> Ràng buộc tuân thủ: **100% Dữ liệu Mở Thực tế**, **Không rò rỉ chủ thể (`subject/user/student split = ∅`)**, **Không bịa số liệu (`AUC 1.0` synthetic đã bị gỡ bỏ hoàn toàn)**.
+    report_md = f"""# Báo cáo Thực nghiệm V2.1 — SP-BEF
 
----
+> Seed `{SEED}` · MediaPipe FaceLandmarker `0.10.14 (float16)` · Toàn bộ số liệu trong file này được sinh tự động bởi `run_sp_bef_pipeline.py` từ `models/sp_bef_params.json`.
+> Bản V2.1 sửa các lỗi của V2.0: (1) nhãn DAiSEE (boredom/engagement/frustration) từng bị dùng làm đặc trưng khuôn mặt; (2) nhãn nhánh hành vi từng được sinh từ chính các đặc trưng; (3) tập DAiSEE từng bị lấy mẫu cân bằng 14/14 mỗi người; (4) baseline stacking dùng hệ số tự đặt; (5) ablation C2 bị mô phỏng bằng cách nhân LLR × 0.55. Các con số của V2.0 không còn giá trị.
 
-## 1. Dữ liệu Mở & Kiểm chứng Không Rò rỉ (`Gate P0 & P7`)
+## 1. Dữ liệu & chia tách
 
-| Nhánh (Modality) | Tập dữ liệu mở | Số lượng mẫu (`train / val / test`) | Đơn vị chia tách (`Group Split`) | Giao tập `train ∩ val ∩ test` | Tỷ lệ cơ sở (`Base Rate b_m`) |
+| Nhánh | Dữ liệu | train / val / test | Đơn vị chia | Base rate (train) | Base rate (test) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Face Branch (On-Device)** | **DAiSEE** (`frame_labels.csv` + khung hình thật) | `{fm['train_clips']} / {fm['val_clips']} / {fm['test_clips']}` clips | Theo `subject` (`{fm['train_subjects']} / {fm['val_subjects']} / {fm['test_subjects']}` chủ thể) | **$\\emptyset$ (0 chủ thể trùng)** | `{sp_bef_params['branches']['face']['base_rate']:.4f}` |
-| **2. Behavior + Segment Prior $\\pi_s$** | **MOOCCubeX** (`user-video.json` & `user-problem.json`) | `{bm['train_sessions']} / {bm['val_sessions']} / {bm['test_sessions']}` phiên | Theo `user_id` (`{bm['unique_users_total']}` học viên) | **$\\emptyset$ (0 học viên trùng)** | `{sp_bef_params['branches']['behavior']['base_rate']:.4f}` |
-| **3. Quiz Branch** | **ASSISTments** (`anonymized_full_release_competition_dataset.csv`) | `{qm['train_rows']} / {qm['val_rows']} / {qm['test_rows']}` lượt | Theo `studentId` (`{qm['unique_students_total']}` học sinh) | **$\\emptyset$ (0 học sinh trùng)** | `{sp_bef_params['branches']['quiz']['base_rate']:.4f}` |
+| Khuôn mặt | DAiSEE, split chính thức, **toàn bộ clip** có mặt người | {fm['train_clips']} / {fm['val_clips']} / {fm['test_clips']} | subject ({fm['train_subjects']}/{fm['val_subjects']}/{fm['test_subjects']}) | {face['base_rate']:.4f} | {fm['test_base_rate']:.4f} |
+| Hành vi | MOOCCubeX `user-video` + `user-problem` (phần đầu) + `course.json` + `exercise-problem` | {bm['train_sessions']} / {bm['val_sessions']} / {bm['test_sessions']} | user ({bm['unique_users_total']} user) | {sp_bef_params['branches']['behavior']['base_rate']:.4f} | {bm['test_base_rate']:.4f} |
+| Quiz | ASSISTments 2017 (toàn bộ file) | {qm['train_rows']} / {qm['val_rows']} / {qm['test_rows']} | student ({qm['unique_students_total']} học sinh) | {sp_bef_params['branches']['quiz']['base_rate']:.4f} | {qm['test_base_rate']:.4f} |
 
----
+Giao tập subject/user/student giữa train, val, test đều bằng ∅ (assert trong pipeline và `tests/test_sp_bef.py`).
 
-## 2. Kết quả Thực nghiệm Từng Nhánh Đơn lẻ (Single-Branch Benchmarks trên Tập Test Chính thức)
+## 2. Từng nhánh (đánh giá một lần trên test)
 
-### 2.1. Nhánh Khuôn mặt (`Face Branch` — DAiSEE Official Test Split)
-- **Tác động của Chuẩn hóa Baseline Cá nhân (Đóng góp C2)**:
-  - Khi **không dùng** chuẩn hóa cá nhân C2 (chỉ dùng 12 đặc trưng thống kê cửa sổ 10s): `AUROC = {fm['test_auroc_no_c2_baseline']:.4f}` (tương đương baseline cũ `0.6610`).
-  - Khi **áp dụng chuẩn hóa Baseline Cá nhân C2** (lấy clip đầu tiên của mỗi `subject` làm tham chiếu cá nhân và loại bỏ clip đó khỏi tập đánh giá): **`AUROC = {fm['test_auroc']:.4f}`**, **`AUPRC = {fm['test_auprc']:.4f}`** (vượt xa baseline luôn âm `{fm['always_negative_auprc']:.4f}`).
-- **Hiệu chỉnh Xác suất Isotonic (Platt/Isotonic Calibration)**:
-  - Sai số hiệu chỉnh kỳ vọng trước hiệu chỉnh: `ECE = {fm['test_ece_uncalibrated']:.4f}` $\\rightarrow$ Sau hiệu chỉnh: **`ECE = {fm['test_ece_calibrated']:.4f}`** ($\\le 0.05$), `Brier = {fm['test_brier']:.4f}`.
-- **Xuất ONNX cho Trình duyệt (`sp_bef_face.onnx`)**:
-  - Kích thước mô hình: **`{fm['onnx_size_bytes']} bytes` (`< 4 KB`, ngân sách $\\le 2\\text{{ MB}}$)**, thời gian suy luận trung bình **`< 0.08 ms/lần`**.
+### 2.1 Khuôn mặt (DAiSEE)
+Đặc trưng: chỉ lấy từ pixel qua MediaPipe (blendshape, EAR, tư thế đầu, độ trôi mũi, các điểm affect heuristic giống hệt trình duyệt). Không có cột nhãn nào.
 
-### 2.2. Nhánh Hành vi Xem Video (`Behavior Branch` — MOOCCubeX Held-out Users)
-- Đặc trưng khớp 1-1 với LMS Runtime (`pause_count`, `avg_pause_duration`, `long_pause_count`, `rewind_count`, `rewind_same_spot`, `speed_change_down`):
-  - **`AUROC = {bm['test_auroc']:.4f}`**, **`AUPRC = {bm['test_auprc']:.4f}`** (so với baseline luôn âm `{bm['always_negative_auprc']:.4f}`), **`ECE = {bm['test_ece_calibrated']:.4f}`**, `Brier = {bm['test_brier']:.4f}`.
+Chọn bộ đặc trưng trên **validation**:
 
-### 2.3. Nhánh Trắc nghiệm (`Quiz Branch` — ASSISTments Held-out Students)
-- Chỉ sử dụng 3 đặc trưng hiện hữu trên LMS (`quiz_accuracy`, `quiz_time_norm`, `attempt_count`), loại bỏ hoàn toàn `hintCount`/`scaffold`:
-  - **`AUROC = {qm['test_auroc']:.4f}`**, **`AUPRC = {qm['test_auprc']:.4f}`** (so với baseline luôn âm `{qm['always_negative_auprc']:.4f}`), **`ECE = {qm['test_ece_calibrated']:.4f}`**, `Brier = {qm['test_brier']:.4f}`.
-- **Phân tích độ nhạy theo ngưỡng nhãn `confidence(CONFUSED)`**:
+| Bộ đặc trưng | val AUROC | val AUPRC |
+| :--- | :--- | :--- |
+{cand_rows}
 
-| Ngưỡng nhãn | Base Rate | Test AUROC | Test AUPRC |
+- Chọn: `{fm['selected_feature_set']}` ({len(face['feature_names'])} đặc trưng).
+- Test: **AUROC = {fm['test_auroc']:.4f}** (95% CI {fm['test_auroc_ci95']}), AUPRC = {fm['test_auprc']:.4f} (luôn-âm = {fm['always_negative_auprc']:.4f}), ECE trước/sau hiệu chỉnh = {fm['test_ece_uncalibrated']:.4f} / {fm['test_ece_calibrated']:.4f}, Brier = {fm['test_brier']:.4f}.
+- Ablation hậu kiểm (không dùng để chọn model): `{posthoc_key}` = {fm[posthoc_key]:.4f}.
+- Nhận định: tín hiệu khuôn mặt trên DAiSEE **yếu** (AUROC gần 0.5–0.6). Nhãn DAiSEE gán cho cả clip 10s và có độ đồng thuận thấp. Nguồn đặc trưng: {daisee_source}.
+
+### 2.2 Hành vi xem video (MOOCCubeX)
+- Nhãn proxy (cố định trước khi train, không tính từ đặc trưng): {bm['label_definition']}.
+- Test: **AUROC = {bm['test_auroc']:.4f}** (95% CI {bm['test_auroc_ci95']}), AUPRC = {bm['test_auprc']:.4f} (luôn-âm = {bm['always_negative_auprc']:.4f}), ECE = {bm['test_ece_calibrated']:.4f}, Brier = {bm['test_brier']:.4f}.
+- Prior theo đoạn video (C3): `{sp_bef_params['segment_prior']['source']}`. Dữ liệu mở không có nhãn bối rối theo từng đoạn nên **C3 chưa được kiểm chứng** và không nằm trong ablation.
+
+### 2.3 Quiz (ASSISTments)
+- Nhãn: {qm['label_definition']}. Lưu ý: {qm['label_caveat']}.
+- Test: **AUROC = {qm['test_auroc']:.4f}** (95% CI {qm['test_auroc_ci95']}), AUPRC = {qm['test_auprc']:.4f} (luôn-âm = {qm['always_negative_auprc']:.4f}), ECE = {qm['test_ece_calibrated']:.4f}, Brier = {qm['test_brier']:.4f}.
+
+| Ngưỡng nhãn | Base rate | Test AUROC | Test AUPRC |
 | :--- | :--- | :--- | :--- |
 {sens_rows}
 
----
+## 3. Fusion — Virtual Learner (bán tổng hợp)
 
-## 3. Đánh giá Hợp nhất Đa phương thức SP-BEF & Nghiên cứu Loại bỏ (Virtual Learner Protocol — P5)
+Nhánh tham gia fusion (CI 95% của AUROC > 0.5 trên cả validation và test; CI val/test: {', '.join(f"{k} {sp_bef_params['branches'][k]['metrics']['val_auroc_ci95']}/{sp_bef_params['branches'][k]['metrics']['test_auroc_ci95']}" for k in ev['branches_enabled'])}): {', '.join(f"{k}={'bật' if v else 'TẮT (w=0)'}" for k, v in ev['branches_enabled'].items())}.
 
-Giao thức **Virtual Learner (C6)** ghép các mẫu **thật** từ tập `test` của DAiSEE, MOOCCubeX và ASSISTments trên `{sp_bef_params['evaluation']['virtual_learner_protocol']['n_learners']}` phiên học (mô phỏng **30% phiên tắt camera**, **60% bước thời gian chưa có quiz**, và **25% khung hình chất lượng webcam kém**):
+Giao thức: {proto['n_learners']} học sinh ảo × {proto['n_steps_per_learner']} bước × {proto['dt_sec']:.0f}s. Trạng thái ẩn theo chuỗi Markov cố định (vào = {proto['p_enter_confused']}, giữ = {proto['p_keep_confused']}), **không phụ thuộc π_s**. Mỗi bước dùng đầu ra thật của từng nhánh có nhãn khớp trạng thái; clip khuôn mặt giữ {proto['face_clip_hold_steps']} bước, phiên hành vi giữ tối đa {proto['behavior_hold_steps']} bước (bằng chứng có tương quan theo thời gian). Quiz xuất hiện ở {proto['quiz_event_rate']:.0%} số bước; {proto['missing_camera_rate']:.0%} phiên tắt camera; {proto['degraded_camera_rate']:.0%} bước camera kém (giả định: LLR nhiễu, r_face thấp).
 
-| Phương pháp / Cấu hình Ablation | Pointwise AUROC | Pointwise AUPRC | ECE $\\downarrow$ | Brier $\\downarrow$ | Độ trễ phát hiện $\\downarrow$ | Can thiệp sai / giờ $\\downarrow$ |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+Siêu tham số SP-BEF (w_face={fus['w_face']}, w_beh={fus['w_beh']}, w_quiz={fus['w_quiz']}, a_keep={fus['hmm_keep_confused']}, theta_on/off={fus['theta_on']}/{fus['theta_off']} — ngưỡng chọn để recall cao nhất với ≤ {MAX_FALSE_INTERVENTIONS_PER_HOUR:.0f} can thiệp sai/giờ, cùng ngưỡng áp cho mọi phương pháp) và baseline stacking được **fit trên VL-val** (dựng từ tập val của các nhánh); bảng dưới là **VL-test** (dựng từ tập test).
+
+| Phương pháp | AUROC | AUPRC | ECE | Brier | Recall đợt | Độ trễ TB | Can thiệp sai/giờ |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 {comp_rows}
 
-### Nhận xét Khoa học & Giới hạn Trung thực
-1. **Tại sao SP-BEF vượt trội so với Luật cũ (`3 lần liên tiếp >= 0.60`) và Trung bình ngây thơ (`Naive Average`)?**
-   - Khi thiếu camera (30% phiên) hoặc chưa có quiz (60% thời gian), phương pháp trung bình xác suất bị kéo lệch về base rate của từng dataset gốc. Phép khử base rate bằng tỷ số hợp lý $\\text{{LLR}}_m = \\text{{logit}}(p_m) - \\text{{logit}}(b_m)$ (**C1**) kết hợp trọng số tin cậy động $r_m(t)$ (**C4**) giúp nhánh vắng mặt tự động có đóng góp bằng `0` mà không làm nhiễu hậu nghiệm.
-   - Bộ lọc tiến **HMM 2 trạng thái + Hysteresis ($\\theta_{{\\text{{on}}}}=0.62, \\theta_{{\\text{{off}}}}=0.42$)** (**C5**) kết hợp **Prior theo đoạn video $\\pi_s$** (**C3**) giảm mạnh số lần can thiệp sai mỗi giờ so với ngưỡng tĩnh.
-2. **Giới hạn của phương pháp (Limitations)**:
-   - Giả định độc lập có điều kiện $\\mathcal{{P}}(X_{{\\text{{face}}}}, X_{{\\text{{beh}}}}, X_{{\\text{{quiz}}}} \\mid Y)$ giữa 3 nhánh là xấp xỉ bậc nhất; do đó cần cắt ngưỡng $\\text{{LLR}}_m \\in [-4, 4]$ và nhân hệ số co $w_m < 1$.
-   - Nhãn của nhánh Behavior (MOOCCubeX) và nhánh Quiz (ASSISTments detector) là **nhãn proxy / nhãn yếu (weak labels)**, nên độ tin cậy tuyệt đối thấp hơn nhãn có chuyên gia chấm trực tiếp; hệ thống phản ánh trung thực điều này qua khoảng tin cậy và cho phép học sinh tự phản hồi (`SelfReportWidget`) để điều chỉnh trực tuyến.
+### Nhận xét (sinh tự động từ bảng)
+{findings_md}
+
+## 4. Giới hạn
+1. Fusion được đánh giá trên dữ liệu **bán tổng hợp**. Giả định độc lập có điều kiện giữa các nhánh đúng theo cách dựng VL nên kết quả fusion là cận trên; cần dữ liệu thật đồng thời ba phương thức để khẳng định.
+2. Lợi ích của C4 trong VL phụ thuộc giả định "camera kém ⇒ LLR nhiễu" do chính giao thức đặt ra.
+3. Nhãn hành vi (sai bài tập cùng chương) và nhãn quiz (đầu ra detector) là nhãn yếu, không phải nhãn bối rối do người quan sát.
+4. Nhánh khuôn mặt: kết quả trên DAiSEE thấp; không nên quảng bá là "phát hiện bối rối bằng camera" mà không có dữ liệu tốt hơn (OL-SFED, ConfusionBench khi công bố).
 """
     (BASE_DIR / "REPORT_V2.md").write_text(report_md, encoding="utf-8")
 
@@ -1502,24 +1564,26 @@ def main() -> None:
 
     print("=== [P2] Building/Loading DAiSEE MediaPipe 0.10.14 Features & Training Face Branch ===")
     df_daisee = build_or_load_daisee_features()
-    face_cfg, face_test_df = run_p2_face_branch(df_daisee)
+    face_cfg, face_val_df, face_test_df = run_p2_face_branch(df_daisee)
     print("Face Branch Metrics:", json.dumps(face_cfg["metrics"], indent=2))
 
-    print("=== [P3] Training Behavior Branch & Segment Prior pi_s on Real MOOCCubeX ===")
-    beh_cfg, prior_cfg, beh_test_df = run_p3_behavior_and_prior()
+    print("=== [P3] Training Behavior Branch on Real MOOCCubeX (chapter-exercise proxy label) ===")
+    beh_cfg, prior_cfg, beh_val_df, beh_test_df = run_p3_behavior_and_prior()
     print("Behavior Branch Metrics:", json.dumps(beh_cfg["metrics"], indent=2))
 
     print("=== [P4] Training Quiz Branch on Real ASSISTments ===")
-    quiz_cfg, quiz_test_df = run_p4_quiz_branch()
+    quiz_cfg, quiz_val_df, quiz_test_df = run_p4_quiz_branch()
     print("Quiz Branch Metrics:", json.dumps(quiz_cfg["metrics"], indent=2))
 
     print("=== [P5] Running SP-BEF Fusion & Virtual Learner Evaluation ===")
     eval_res = run_p5_virtual_learner_evaluation(
-        face_cfg, face_test_df, beh_cfg, prior_cfg, beh_test_df, quiz_cfg, quiz_test_df
+        face_cfg, face_val_df, face_test_df,
+        beh_cfg, beh_val_df, beh_test_df,
+        quiz_cfg, quiz_val_df, quiz_test_df,
     )
 
     sp_bef_params = {
-        "version": "2.0.0-sp-bef",
+        "version": "2.1.0-sp-bef",
         "seed": SEED,
         "llr_clip": LLR_CLIP,
         "fusion": eval_res["fusion_config"],
@@ -1546,6 +1610,10 @@ def main() -> None:
 
     print("=== [P7] Generating Golden Parity Files & REPORT_V2.md ===")
     generate_golden_files(sp_bef_params, df_daisee)
+    # Go and web parity tests read their own copies of the golden files.
+    for name in ("parity_vectors.json", "video_features_golden.json"):
+        shutil.copy2(GOLDEN_DIR / name, web_cv_dir / "__tests__" / name)
+    shutil.copy2(GOLDEN_DIR / "parity_vectors.json", go_models_dir / "parity_vectors.json")
     write_report_v2(manifest, sp_bef_params)
 
     print(f"=== Completed SP-BEF V2 Pipeline in {time.time() - t_start:.2f}s ===")

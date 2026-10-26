@@ -11,6 +11,8 @@ import {
   PersonalBaselineCalibrator,
   SP_BEF_PARAMS,
   aggregateClipWindow,
+  subsampleFaceWindow,
+  clipVal,
   computeFrameReliability,
   getSegmentPriorForTimestamp,
   predictLinearCalibratedBranch,
@@ -151,6 +153,9 @@ export interface ConfusionState {
   interventionOpen: boolean;
   interventionLoading: boolean;
   resolvedEpisodesCount: number;
+  // Soft, non-blocking "is this part hard?" prompt raised by SP-BEF (camera/behaviour/quiz evidence is weak,
+  // so the model asks instead of opening the tutor on its own).
+  nudgeOpen: boolean;
 
   // Actions
   setCameraEnabled: (enabled: boolean) => void;
@@ -204,8 +209,17 @@ export interface ConfusionState {
     bypassCooldown?: boolean,
   ) => Promise<void>;
   closeIntervention: (feedback?: 'helpful' | 'not_helpful' | 'dismissed') => void;
+  respondToConfusionNudge: (lessonId: number, videoTimestampSec: number, needsHelp: boolean) => Promise<void>;
   resetCooldown: () => void;
   resetAll: () => void;
+}
+
+/** Opens the soft confusion prompt when SP-BEF decides to intervene and nothing is already shown. */
+export function nudgeOnIntervene(
+  state: Pick<ConfusionState, 'interventionOpen' | 'nudgeOpen'>,
+  step: { should_intervene: boolean },
+): Partial<ConfusionState> {
+  return step.should_intervene && !state.interventionOpen && !state.nudgeOpen ? { nudgeOpen: true } : {};
 }
 
 export const INITIAL_FEATURES_12: MultimodalFeatures12 = {
@@ -353,7 +367,8 @@ function computeWindowedFeaturesAndSpBef(params: {
   let llrFace = 0.0;
   if (validFrames.length > 0) {
     const lastFrame = validFrames[validFrames.length - 1];
-    const stats: FrameTelemetryStat[] = validFrames.map((fw) => ({
+    // Aggregate at ~10 fps like the training data; validFrames itself keeps every frame for the UI.
+    const stats: FrameTelemetryStat[] = subsampleFaceWindow(validFrames).map((fw) => ({
       detected: fw.detected && fw.emotion !== 'no_face',
       luminance: fw.avgLuminance,
       brow_furrow: fw.browFurrowScore,
@@ -380,8 +395,8 @@ function computeWindowedFeaturesAndSpBef(params: {
 
     if (rFace > 0) {
       storeBaselineCalibrator.observe(agg, rFace, params.nowMs);
-      const faceVec20 = storeBaselineCalibrator.build20FaceModelVector(agg, rFace);
-      const faceBranch = predictLinearCalibratedBranch(faceVec20, SP_BEF_PARAMS.branches.face);
+      const faceVec = storeBaselineCalibrator.buildFaceModelVector(agg, rFace);
+      const faceBranch = predictLinearCalibratedBranch(faceVec, SP_BEF_PARAMS.branches.face);
       llrFace = lastFrame.llrFace !== 0 ? lastFrame.llrFace : faceBranch.llr;
     } else {
       llrFace = 0.0;
@@ -395,11 +410,12 @@ function computeWindowedFeaturesAndSpBef(params: {
   let llrBeh = 0.0;
   if (hasBehActivity) {
     rBeh = 1.0;
+    // Same caps as session_behavior_features() in ml/run_sp_bef_pipeline.py.
     const behVec = [
-      pauseCount,
-      avgPauseDuration,
-      longPauseCount,
-      rewindCount,
+      Math.min(pauseCount, 15),
+      Math.min(avgPauseDuration, 180),
+      Math.min(longPauseCount, 10),
+      Math.min(rewindCount, 12),
       rewindSameSpot > 0 ? 1.0 : 0.0,
       speedDecrease,
     ];
@@ -411,10 +427,11 @@ function computeWindowedFeaturesAndSpBef(params: {
   let llrQuiz = 0.0;
   if (latestQuiz) {
     rQuiz = 1.0;
+    // Same ranges as run_p4_quiz_branch(): accuracy 0..100, time clipped to 1..180s, attempts to 1..5.
     const quizVec = [
-      latestQuiz.scorePercent,
-      latestQuiz.timeSec,
-      latestQuiz.attemptCount,
+      clipVal(latestQuiz.scorePercent, 0, 100),
+      clipVal(latestQuiz.timeSec, 1, 180),
+      clipVal(latestQuiz.attemptCount, 1, 5),
     ];
     llrQuiz = predictLinearCalibratedBranch(quizVec, SP_BEF_PARAMS.branches.quiz).llr;
   }
@@ -510,6 +527,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
   interventionOpen: false,
   interventionLoading: false,
   resolvedEpisodesCount: 0,
+  nudgeOpen: false,
 
   setCameraEnabled: (enabled) => set({ cameraEnabled: enabled }),
   setCameraStreaming: (streaming) => set({ cameraStreaming: streaming }),
@@ -636,6 +654,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribQuiz: computed.step.contrib_quiz,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
+      ...nudgeOnIntervene(state, computed.step),
       cooldownRemainingSec: computed.step.cooldown_remaining_sec,
       personalBaselineReady: m.personalBaselineReady ?? computed.personalBaselineReady,
       emotionTimeline: nextTimeline,
@@ -692,6 +711,8 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribQuiz: computed.step.contrib_quiz,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
+      cooldownRemainingSec: computed.step.cooldown_remaining_sec,
+      ...nudgeOnIntervene(state, computed.step),
     });
   },
 
@@ -745,6 +766,8 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribQuiz: computed.step.contrib_quiz,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
+      cooldownRemainingSec: computed.step.cooldown_remaining_sec,
+      ...nudgeOnIntervene(state, computed.step),
     });
   },
 
@@ -788,6 +811,8 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribQuiz: computed.step.contrib_quiz,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
+      cooldownRemainingSec: computed.step.cooldown_remaining_sec,
+      ...nudgeOnIntervene(state, computed.step),
     });
   },
 
@@ -834,6 +859,8 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribQuiz: computed.step.contrib_quiz,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
+      cooldownRemainingSec: computed.step.cooldown_remaining_sec,
+      ...nudgeOnIntervene(state, computed.step),
     });
   },
 
@@ -876,12 +903,30 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribQuiz: computed.step.contrib_quiz,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
+      cooldownRemainingSec: computed.step.cooldown_remaining_sec,
+      ...nudgeOnIntervene(state, computed.step),
     });
   },
 
   syncPredictConfusionWithApi: async () => {
     const state = get();
-    const res = await lmsApi.predictConfusion(state.features12);
+    // Send the on-device branch evidence (LLR + reliability) and HMM state, never raw face data, so the
+    // server runs the same SP-BEF step instead of re-deriving face/quiz evidence from summary ratios.
+    const res = await lmsApi.predictConfusion({
+      hasFace: state.rFace > 0,
+      llrFace: state.llrFace,
+      rFace: state.rFace,
+      llrBeh: state.llrBeh,
+      rBeh: state.rBeh,
+      hasQuiz: state.rQuiz > 0,
+      llrQuiz: state.llrQuiz,
+      rQuiz: state.rQuiz,
+      segmentPrior: state.segmentPrior,
+      prevPosterior: state.posteriorProb,
+      prevHighSec: state.highDurationSec,
+      prevIntervening: state.interventionOpen,
+      cooldownRemainingSec: state.cooldownRemainingSec,
+    });
     if (res.status === 'indeterminate' || res.level === 'unknown' || res.probability === null) {
       set({
         apiStatus: 'indeterminate',
@@ -1025,11 +1070,18 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
         feedback === 'helpful' ? s.resolvedEpisodesCount + 1 : s.resolvedEpisodesCount,
     })),
 
+  respondToConfusionNudge: async (lessonId, videoTimestampSec, needsHelp) => {
+    set({ nudgeOpen: false });
+    // The answer is stored as a self-report, so every prompt also yields a labelled data point.
+    await get().submitSelfReport(lessonId, videoTimestampSec, needsHelp ? 3 : 1);
+  },
+
   resetCooldown: () => set({ lastTriggerTimestampMs: null, cooldownRemainingSec: 0 }),
 
   resetAll: () => {
     storeBaselineCalibrator.reset();
     set({
+      nudgeOpen: false,
       currentEmotion: 'neutral',
       emotionConfidence: 0,
       earAvg: 0,

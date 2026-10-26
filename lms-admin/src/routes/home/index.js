@@ -201,7 +201,7 @@ export default function Home() {
       dataIndex: 'trigger_source',
       key: 'trigger_source',
       render: (src) => {
-        if (src === 'ml_model') return <Tag color="volcano">MLP 12-Features</Tag>;
+        if (src === 'ml_model') return <Tag color="volcano">SP-BEF</Tag>;
         if (src === 'hybrid_rule') return <Tag color="orange">Hybrid Rule (&ge;35)</Tag>;
         return <Tag color="geekblue">Self-Report</Tag>;
       },
@@ -306,10 +306,10 @@ export default function Home() {
                   Xu hướng Phát hiện Bối rối &amp; Can thiệp AI Tutor (7 Ngày qua)
                 </Title>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  Tổng hợp từ MediaPipe 478 Landmarks + BiLSTM ONNX + 12 Đặc trưng Đa phương thức
+                  Tổng hợp từ SP-BEF: nhánh khuôn mặt (MediaPipe), hành vi xem video và quiz
                 </Text>
               </div>
-              <Tag color="blue">AUC = 0.9999 (MLP 12-Features)</Tag>
+              <Tag color="blue">Fusion AUROC = 0.676 (Virtual Learner test)</Tag>
             </div>
             <ConfusionTrendChart data={stats?.confusionTrend7Days || []} />
           </div>

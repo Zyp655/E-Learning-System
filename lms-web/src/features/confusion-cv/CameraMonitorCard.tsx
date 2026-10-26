@@ -392,7 +392,7 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
                 </Badge>
               </div>
               <p className="text-xs text-secondary">
-                100% suy luận tại biên (ONNX `sp_bef_face.onnx` + MediaPipe 0.10.14) · Khử Base-Rate LLR · Bộ lọc HMM 2 trạng thái
+                Suy luận trên trình duyệt (MediaPipe 0.10.14 + hồi quy logistic từ `sp_bef_params.json`) · Khử Base-Rate LLR · Bộ lọc HMM 2 trạng thái
               </p>
             </div>
           </div>
@@ -698,8 +698,8 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
           <div className="rounded-xl bg-muted p-3.5 space-y-2">
             <p className="font-semibold text-primary">1. Không gửi ảnh hoặc điểm mốc khuôn mặt lên máy chủ</p>
             <p>
-              Toàn bộ mô hình MediaPipe Face Landmarker (478 điểm mốc 3D), chuẩn hóa baseline cá nhân 60–90s đầu phiên
-              (C2), trọng số tin cậy động r_face(t) (C4) và suy luận ONNX đều chạy trực tiếp trên trình duyệt.
+              Toàn bộ MediaPipe Face Landmarker (478 điểm mốc 3D), trọng số tin cậy động r_face(t) (C4) và mô hình
+              khuôn mặt (hồi quy logistic, tham số trong sp_bef_params.json) đều chạy trực tiếp trên trình duyệt.
             </p>
           </div>
           <div className="rounded-xl bg-muted p-3.5 space-y-2">

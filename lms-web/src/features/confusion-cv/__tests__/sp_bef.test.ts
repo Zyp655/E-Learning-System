@@ -8,6 +8,8 @@ import {
   computeFrameReliability,
   predictLinearCalibratedBranch,
   spBefStep,
+  subsampleFaceWindow,
+  FACE_WINDOW_SAMPLE_MS,
   type AggregatedClipWindow,
 } from '../spBefCore';
 import {
@@ -15,7 +17,7 @@ import {
   extract192dBiometricDescriptor,
   type Point3D,
 } from '../realFaceTracker';
-import { useConfusionStore } from '../useConfusionStore';
+import { nudgeOnIntervene, useConfusionStore } from '../useConfusionStore';
 import { lmsApi } from '@/api';
 
 describe('SP-BEF V2 Core & Multimodal Confusion Engine (P7-Web Verification)', () => {
@@ -243,6 +245,22 @@ describe('SP-BEF V2 Core & Multimodal Confusion Engine (P7-Web Verification)', (
       expect(stepDark.contrib_face).toBe(0.0);
     });
 
+    it('builds the face vector in the order of sp_bef_params feature_names and rejects unknown names', () => {
+      const window = aggregateClipWindow(videoFeaturesGolden.frames) as AggregatedClipWindow;
+      const calibrator = new PersonalBaselineCalibrator(3, 60);
+      const names = SP_BEF_PARAMS.branches.face.feature_names ?? [];
+      const vec = calibrator.buildFaceModelVector(window);
+
+      expect(names.length).toBe(SP_BEF_PARAMS.branches.face.coefficients.length);
+      expect(vec).toHaveLength(names.length);
+      names.forEach((name, i) => {
+        if (name in window) {
+          expect(vec[i]).toBe(window[name as keyof AggregatedClipWindow]);
+        }
+      });
+      expect(() => calibrator.buildFaceModelVector(window, 1.0, ['boredom'])).toThrow(/Unknown face feature/);
+    });
+
     it('computes C2 personal baseline z-scores from initial neutral frames and detects elevated brow furrow', () => {
       const calibrator = new PersonalBaselineCalibrator(3, 60);
       const neutralSample = {
@@ -290,6 +308,31 @@ describe('SP-BEF V2 Core & Multimodal Confusion Engine (P7-Web Verification)', (
       expect(res.embedding192).toEqual([]);
     });
 
+    it('subsamples a face window to ~10 fps (first frame kept, jitter tolerated)', () => {
+      const frames = Array.from({ length: 61 }, (_, i) => ({ timestampMs: i * (1000 / 60) }));
+      const sampled = subsampleFaceWindow(frames);
+      expect(sampled[0].timestampMs).toBe(0);
+      expect(sampled).toHaveLength(11);
+      for (let i = 1; i < sampled.length; i++) {
+        expect(sampled[i].timestampMs - sampled[i - 1].timestampMs).toBeGreaterThanOrEqual(FACE_WINDOW_SAMPLE_MS);
+      }
+    });
+
+    it('samples the 10 s face window at ~10 fps like the DAiSEE training data, whatever the frame rate', async () => {
+      const session = new RealFaceTrackerSession();
+      const emb: { front: number[] | null; left: number[] | null; right: number[] | null } = {
+        front: null,
+        left: null,
+        right: null,
+      };
+      // 12 s of a 60 fps render loop.
+      for (let i = 0; i < 720; i++) {
+        await session.processFrame(null, null, 320, 200, emb, 1_000_000 + i * (1000 / 60));
+      }
+      expect(session.getWindowFrameCount()).toBeGreaterThanOrEqual(95);
+      expect(session.getWindowFrameCount()).toBeLessThanOrEqual(101);
+    });
+
     it('computes 192-d L2-normalized biometric descriptor purely from nose-centered, IOD-normalized 3D landmarks', () => {
       expect(extract192dBiometricDescriptor([])).toEqual([]);
 
@@ -316,6 +359,42 @@ describe('SP-BEF V2 Core & Multimodal Confusion Engine (P7-Web Verification)', (
       expect(step.contrib_face).toBe(0.0);
       expect(step.contrib_beh).toBe(0.0);
       expect(step.contrib_quiz).toBe(0.0);
+    });
+
+    it('raises the soft nudge only when SP-BEF intervenes and nothing is already open', () => {
+      expect(nudgeOnIntervene({ interventionOpen: false, nudgeOpen: false }, { should_intervene: true })).toEqual({ nudgeOpen: true });
+      expect(nudgeOnIntervene({ interventionOpen: true, nudgeOpen: false }, { should_intervene: true })).toEqual({});
+      expect(nudgeOnIntervene({ interventionOpen: false, nudgeOpen: true }, { should_intervene: true })).toEqual({});
+      expect(nudgeOnIntervene({ interventionOpen: false, nudgeOpen: false }, { should_intervene: false })).toEqual({});
+    });
+
+    it('opens the nudge from repeated wrong, slow quiz answers and keeps the cooldown so it does not re-open', () => {
+      const t0 = 1_000_000;
+      for (let i = 0; i < 4; i++) {
+        useConfusionStore.getState().recordQuizOutcome(0, 150, 5, t0 + i * 5_000);
+      }
+      const s = useConfusionStore.getState();
+      expect(s.nudgeOpen).toBe(true);
+      expect(s.cooldownRemainingSec).toBeGreaterThan(0);
+
+      useConfusionStore.setState({ nudgeOpen: false });
+      useConfusionStore.getState().recordQuizOutcome(0, 150, 5, t0 + 20_000);
+      expect(useConfusionStore.getState().nudgeOpen).toBe(false);
+    });
+
+    it('records the nudge answer as a self-report and opens the tutor only when help is requested', async () => {
+      useConfusionStore.setState({ nudgeOpen: true });
+      await useConfusionStore.getState().respondToConfusionNudge(101, 42, false);
+      let s = useConfusionStore.getState();
+      expect(s.nudgeOpen).toBe(false);
+      expect(s.selfReports[0].level).toBe(1);
+      expect(s.interventionOpen).toBe(false);
+
+      useConfusionStore.setState({ nudgeOpen: true });
+      await useConfusionStore.getState().respondToConfusionNudge(101, 42, true);
+      s = useConfusionStore.getState();
+      expect(s.selfReports[0].level).toBe(3);
+      expect(s.interventionOpen).toBe(true);
     });
 
     it('returns status: "indeterminate" and probability: null without fabricating probabilities when backend API is offline', async () => {
