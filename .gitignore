@@ -19,6 +19,10 @@ bin/
 # ML Datasets & Large Checkpoints
 ml/data/
 ml/frames/
+ml/.venv/
+.venv/
+__pycache__/
+.pytest_cache/
 *.pth
 *.pt
 *.npz

@@ -12,6 +12,8 @@ import {
   Tag,
   Divider,
   Descriptions,
+  Progress,
+  Table,
   message,
   Typography,
 } from 'antd';
@@ -22,11 +24,51 @@ import {
   RobotOutlined,
   SafetyCertificateOutlined,
   ReloadOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons';
 import PageTitle from '../../components/PageTitle';
 import confusionApi from '../../api/confusion';
 
 const { Title, Text } = Typography;
+
+const LLR_DISTRIBUTION_DATA = [
+  {
+    key: 'face',
+    branch: '1. Face Branch (DAiSEE · Browser ONNX)',
+    dataset: 'DAiSEE (1,732 train / 530 test clips · 108 subjects)',
+    baseRate: '0.4729',
+    auroc: '0.7367',
+    auprc: '0.7523',
+    ece: '0.0422',
+    meanNegLLR: -0.68,
+    meanPosLLR: +0.84,
+    weightKey: 'w_face = 0.65',
+  },
+  {
+    key: 'beh',
+    branch: '2. Behavior + Segment Prior π_s',
+    dataset: 'MOOCCubeX (9,299 train / 1,276 test · 1,277 users)',
+    baseRate: '0.3404',
+    auroc: '0.8459',
+    auprc: '0.8320',
+    ece: '0.0279',
+    meanNegLLR: -1.18,
+    meanPosLLR: +1.42,
+    weightKey: 'w_beh = 0.85',
+  },
+  {
+    key: 'quiz',
+    branch: '3. Quiz Branch (In-Video Segment Quiz)',
+    dataset: 'ASSISTments (54,975 train / 12,121 test · 97 students)',
+    baseRate: '0.1695',
+    auroc: '0.7878',
+    auprc: '0.4563',
+    ece: '0.0366',
+    meanNegLLR: -0.92,
+    meanPosLLR: +1.56,
+    weightKey: 'w_quiz = 0.90',
+  },
+];
 
 export default function AiSettings() {
   const [form] = Form.useForm();
@@ -43,13 +85,17 @@ export default function AiSettings() {
       const data = await confusionApi.getSettings();
       setSettingsMeta(data);
       form.setFieldsValue({
-        ml_threshold: data.ml_threshold ?? 0.60,
-        rule_threshold: data.rule_threshold ?? 35,
-        sliding_window_size: data.sliding_window_size ?? 3,
-        cooldown_seconds: data.cooldown_seconds ?? 300,
+        theta_on: data.theta_on ?? data.ml_threshold ?? 0.62,
+        theta_off: data.theta_off ?? 0.42,
+        min_hold_sec: data.min_hold_sec ?? 10,
+        cooldown_seconds: data.cooldown_seconds ?? 180,
+        w_face: data.w_face ?? 0.65,
+        w_beh: data.w_beh ?? 0.85,
+        w_quiz: data.w_quiz ?? 0.90,
+        hmm_keep_confused: data.hmm_keep_confused ?? 0.78,
         face_similarity_threshold: data.face_similarity_threshold ?? 0.55,
         max_absent_checks: data.max_absent_checks ?? 6,
-        active_predictor: data.active_predictor || 'mlp_3layer_64_32_16',
+        active_predictor: data.active_predictor || 'sp_bef_v2_bayesian_hmm',
         llm_vision_model: data.llm_vision_model || 'gpt-4o-mini',
       });
     } finally {
@@ -64,10 +110,14 @@ export default function AiSettings() {
   const handleSaveSettings = async (values) => {
     setSaving(true);
     try {
-      const updated = await confusionApi.updateSettings(values);
+      const payload = {
+        ...values,
+        ml_threshold: values.theta_on,
+      };
+      const updated = await confusionApi.updateSettings(payload);
       setSettingsMeta(updated);
       message.success(
-        'Đã lưu cấu hình Ngưỡng Phát hiện Bối rối (`confusion_settings`) và đồng bộ tới Redis!'
+        'Đã lưu cấu hình SP-BEF (θ_on, θ_off, w_m, Cooldown) và đồng bộ tới Redis / Go Backend!'
       );
     } finally {
       setSaving(false);
@@ -98,20 +148,72 @@ export default function AiSettings() {
         title: 'Khởi tạo Dữ liệu Mẫu Toàn Hệ thống (POST /v1/admin/seed-data) Thành công',
         details: `Đã nạp dữ liệu chuẩn cho ${res.tables_populated} bảng PostgreSQL (${res.departments} khoa, ${res.users} người dùng, ${res.courses} khóa học, ${res.confusion_episodes} phiên bối rối).`,
       });
-      message.success('Đã nạp dữ liệu mẫu chuẩn cho toàn bộ 58 bảng!');
+      message.success('Đã nạp dữ liệu mẫu chuẩn cho toàn bộ hệ thống!');
     } finally {
       setSeedLoading(false);
     }
   };
 
+  const llrColumns = [
+    {
+      title: 'Nhánh Bằng chứng (SP-BEF Branch)',
+      dataIndex: 'branch',
+      key: 'branch',
+      render: (val, row) => (
+        <div>
+          <div style={{ fontWeight: 600, color: '#0A3150' }}>{val}</div>
+          <div style={{ fontSize: 12, color: '#64748b' }}>{row.dataset}</div>
+        </div>
+      ),
+    },
+    {
+      title: 'Base Rate (b_m)',
+      dataIndex: 'baseRate',
+      key: 'baseRate',
+      width: 110,
+      render: (v) => <Tag color="blue">{v}</Tag>,
+    },
+    {
+      title: 'Test AUROC / AUPRC / ECE',
+      key: 'metrics',
+      width: 210,
+      render: (_, row) => (
+        <Space size={4} wrap>
+          <Tag color="geekblue">AUC: {row.auroc}</Tag>
+          <Tag color="cyan">PR: {row.auprc}</Tag>
+          <Tag color="green">ECE: {row.ece}</Tag>
+        </Space>
+      ),
+    },
+    {
+      title: 'Phân bố LLR_m ∈ [-4, +4] (Không bối rối vs Bối rối)',
+      key: 'llrDist',
+      render: (_, row) => (
+        <div style={{ minWidth: 200 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+            <span style={{ color: '#16a34a' }}>E[LLR | y=0]: {row.meanNegLLR}</span>
+            <span style={{ fontWeight: 600, color: '#0A3150' }}>{row.weightKey}</span>
+            <span style={{ color: '#dc2626' }}>E[LLR | y=1]: +{row.meanPosLLR}</span>
+          </div>
+          <Progress
+            percent={Math.round(((row.meanPosLLR - row.meanNegLLR) / 4.0) * 100)}
+            strokeColor="#0A3150"
+            size="small"
+            showInfo={false}
+          />
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div>
       <PageTitle
-        title="Cấu hình Mô hình Phát hiện Bối rối CV & Trợ lý Ảo AI (`confusion_settings`)"
-        subtitle="Điều chỉnh siêu tham số quyết định can thiệp chủ động (Proactive Auto-Intervention), ngưỡng sinh trắc MobileFaceNet và công cụ vận hành pgvector"
+        title="Cấu hình SP-BEF (Segment-Prior Bayesian Evidence Fusion) & Trợ lý Ảo AI"
+        subtitle="Điều chỉnh ngưỡng trễ Hysteresis (θ_on / θ_off), hệ số co từng nhánh (w_face, w_beh, w_quiz), bộ lọc HMM 2 trạng thái và xem phân bố Log-Likelihood Ratio (LLR)"
         routes={[
           { path: '/app/home', breadcrumbName: 'Trang chủ' },
-          { breadcrumbName: 'Cấu hình AI & Confusion CV' },
+          { breadcrumbName: 'Cấu hình SP-BEF & AI Tutor' },
         ]}
         extra={
           <Button icon={<ReloadOutlined />} onClick={fetchSettings} loading={loading}>
@@ -134,13 +236,14 @@ export default function AiSettings() {
 
       <Row gutter={[16, 16]}>
         <Col lg={15} xs={24}>
-          <div className="admin-page-card">
+          <div className="admin-page-card" style={{ marginBottom: 16 }}>
             <Title level={5} style={{ marginTop: 0, color: '#0A3150' }}>
               <RobotOutlined style={{ marginRight: 8 }} />
-              Siêu tham số Mô hình Bối rối Đa phương thức &amp; Biometric Guard
+              Siêu tham số Hợp nhất Bằng chứng Bayes (SP-BEF) &amp; Bộ lọc HMM 2 Trạng thái
             </Title>
             <Text type="secondary" style={{ display: 'block', marginBottom: 20, fontSize: 13 }}>
-              Áp dụng tức thì cho `ConfusionPredictor` trên Go Backend và Web Worker trên trình duyệt học sinh
+              Công thức hậu nghiệm: <code>logit P(t) = logit P⁻(t) + Σ r_m(t) · w_m · LLR_m(t)</code> với{' '}
+              <code>LLR_m = clip(logit(Calib(p_m)) - logit(b_m), -4, 4)</code>
             </Text>
 
             <Form
@@ -148,41 +251,86 @@ export default function AiSettings() {
               layout="vertical"
               onFinish={handleSaveSettings}
               initialValues={{
-                ml_threshold: 0.60,
-                rule_threshold: 35,
-                sliding_window_size: 3,
-                cooldown_seconds: 300,
+                theta_on: 0.62,
+                theta_off: 0.42,
+                min_hold_sec: 10,
+                cooldown_seconds: 180,
+                w_face: 0.65,
+                w_beh: 0.85,
+                w_quiz: 0.90,
+                hmm_keep_confused: 0.78,
                 face_similarity_threshold: 0.55,
                 max_absent_checks: 6,
-                active_predictor: 'mlp_3layer_64_32_16',
+                active_predictor: 'sp_bef_v2_bayesian_hmm',
                 llm_vision_model: 'gpt-4o-mini',
               }}
             >
               <Row gutter={16}>
-                <Col md={12} xs={24}>
+                <Col md={8} xs={24}>
                   <Form.Item
-                    name="ml_threshold"
-                    label="Ngưỡng Xác suất ML (`ml_threshold` — Mặc định: 0.60)"
-                    extra="Kích hoạt bối rối khi P(confused) từ MLP 12-Features / BiLSTM ONNX >= ngưỡng này."
+                    name="theta_on"
+                    label="Ngưỡng Bật Can thiệp (θ_on — Mặc định: 0.62)"
+                    extra="Bật trạng thái bối rối khi P(t) ≥ θ_on liên tục trong ≥ T giây."
                     rules={[{ required: true }]}
                   >
-                    <InputNumber
-                      min={0.30}
-                      max={0.95}
-                      step={0.05}
-                      style={{ width: '100%' }}
-                    />
+                    <InputNumber min={0.45} max={0.90} step={0.02} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
 
-                <Col md={12} xs={24}>
+                <Col md={8} xs={24}>
                   <Form.Item
-                    name="rule_threshold"
-                    label="Ngưỡng Điểm Luật Lai (`rule_threshold` — Mặc định: 35)"
-                    extra="Điểm kết hợp hành vi tua lại, dừng lâu, Eye-Lock và tự báo cáo (0..100)."
+                    name="theta_off"
+                    label="Ngưỡng Tắt Hysteresis (θ_off — Mặc định: 0.42)"
+                    extra="Hạ cờ bối rối khi P(t) < θ_off (θ_off < θ_on chống dao động)."
                     rules={[{ required: true }]}
                   >
-                    <InputNumber min={10} max={90} step={5} style={{ width: '100%' }} />
+                    <InputNumber min={0.20} max={0.60} step={0.02} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+
+                <Col md={8} xs={24}>
+                  <Form.Item
+                    name="min_hold_sec"
+                    label="Thời gian Duy trì Tối thiểu (T giây — Mặc định: 10s)"
+                    extra="Số giây P(t) ≥ θ_on trước khi kích hoạt AI Tutor."
+                    rules={[{ required: true }]}
+                  >
+                    <InputNumber min={5} max={30} step={5} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={16}>
+                <Col md={8} xs={24}>
+                  <Form.Item
+                    name="w_face"
+                    label="Trọng số Nhánh Face (w_face — Mặc định: 0.65)"
+                    extra="Nhân với r_face(t) · LLR_face(t) (DAiSEE + Personal Baseline C2)."
+                    rules={[{ required: true }]}
+                  >
+                    <InputNumber min={0.1} max={1.5} step={0.05} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+
+                <Col md={8} xs={24}>
+                  <Form.Item
+                    name="w_beh"
+                    label="Trọng số Nhánh Behavior (w_beh — Mặc định: 0.85)"
+                    extra="Nhân với r_beh(t) · LLR_beh(t) (MOOCCubeX 300s window)."
+                    rules={[{ required: true }]}
+                  >
+                    <InputNumber min={0.1} max={1.5} step={0.05} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+
+                <Col md={8} xs={24}>
+                  <Form.Item
+                    name="w_quiz"
+                    label="Trọng số Nhánh Quiz (w_quiz — Mặc định: 0.90)"
+                    extra="Nhân với r_quiz(t) · LLR_quiz(t) (ASSISTments In-Video Quiz)."
+                    rules={[{ required: true }]}
+                  >
+                    <InputNumber min={0.1} max={1.5} step={0.05} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -190,20 +338,20 @@ export default function AiSettings() {
               <Row gutter={16}>
                 <Col md={12} xs={24}>
                   <Form.Item
-                    name="sliding_window_size"
-                    label="Kích thước Cửa sổ Trượt (`sliding_window_size` — Mặc định: 3)"
-                    extra="Số chu kỳ liên tiếp vượt ngưỡng trước khi tự động dừng video và mở giải thích AI."
+                    name="hmm_keep_confused"
+                    label="Quán tính Trạng thái Ẩn HMM (a = P(C_t | C_{t-1}) — Mặc định: 0.78)"
+                    extra="Dự đoán trước: P⁻(t) = a·P(t-1) + β(π_s)·(1 - P(t-1))."
                     rules={[{ required: true }]}
                   >
-                    <InputNumber min={1} max={10} style={{ width: '100%' }} />
+                    <InputNumber min={0.40} max={0.95} step={0.02} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
 
                 <Col md={12} xs={24}>
                   <Form.Item
                     name="cooldown_seconds"
-                    label="Thời gian Nghỉ Giữa 2 Lần Can thiệp (`cooldown_seconds` — Mặc định: 300s)"
-                    extra="Chống làm phiền học sinh liên tục (300 giây = 5 phút)."
+                    label="Thời gian Nghỉ Giữa 2 Lần Can thiệp (`cooldown_seconds` — Mặc định: 180s)"
+                    extra="Tối ưu theo chi phí làm phiền C_FP vs bỏ sót C_FN."
                     rules={[{ required: true }]}
                   >
                     <InputNumber min={60} max={1800} step={30} style={{ width: '100%' }} />
@@ -226,7 +374,12 @@ export default function AiSettings() {
                     extra="Cosine Similarity tối thiểu giữa vector 192-d hiện tại và 3 góc mặt đã đăng ký."
                     rules={[{ required: true }]}
                   >
-                    <Slider min={0.35} max={0.85} step={0.05} marks={{ 0.45: '0.45', 0.55: '0.55', 0.70: '0.70' }} />
+                    <Slider
+                      min={0.35}
+                      max={0.85}
+                      step={0.05}
+                      marks={{ 0.45: '0.45', 0.55: '0.55', 0.70: '0.70' }}
+                    />
                   </Form.Item>
                 </Col>
 
@@ -244,11 +397,17 @@ export default function AiSettings() {
 
               <Row gutter={16}>
                 <Col md={12} xs={24}>
-                  <Form.Item name="active_predictor" label="Bộ Dự đoán 12-Features trên Go Backend">
+                  <Form.Item name="active_predictor" label="Cơ chế Hợp nhất trên Go Backend & Web Worker">
                     <Select
                       options={[
-                        { value: 'mlp_3layer_64_32_16', label: '3-Layer MLP (64, 32, 16) — mlp_weights.json' },
-                        { value: 'logistic_regression', label: 'Logistic Regression — lr_weights.json' },
+                        {
+                          value: 'sp_bef_v2_bayesian_hmm',
+                          label: 'SP-BEF V2 (Calibrated LLR + Segment Prior π_s + 2-State HMM) — Khuyên dùng',
+                        },
+                        {
+                          value: 'mlp_3layer_64_32_16',
+                          label: 'Legacy 3-Layer MLP (64, 32, 16) — mlp_weights.json',
+                        },
                       ]}
                     />
                   </Form.Item>
@@ -257,7 +416,7 @@ export default function AiSettings() {
                   <Form.Item name="llm_vision_model" label="Mô hình Multi-Modal Vision RAG">
                     <Select
                       options={[
-                        { value: 'gpt-4o-mini', label: 'OpenAI gpt-4o-mini Vision (Khuyên dùng — Độ trễ thấp)' },
+                        { value: 'gpt-4o-mini', label: 'OpenAI gpt-4o-mini Vision (Độ trễ thấp)' },
                         { value: 'gpt-4o', label: 'OpenAI gpt-4o Vision (Chuyên sâu)' },
                       ]}
                     />
@@ -272,9 +431,27 @@ export default function AiSettings() {
                 icon={<SaveOutlined />}
                 loading={saving}
               >
-                Lưu Cấu hình (`PUT /v1/admin/confusion/settings`)
+                Lưu Cấu hình SP-BEF (`PUT /v1/admin/confusion/settings`)
               </Button>
             </Form>
+          </div>
+
+          <div className="admin-page-card">
+            <Title level={5} style={{ marginTop: 0, color: '#0A3150' }}>
+              <BarChartOutlined style={{ marginRight: 8 }} />
+              Phân bố Tỷ số Hợp lý Hiệu chỉnh (`LLR_m`) &amp; Chỉ số Thực nghiệm Từng Nhánh
+            </Title>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
+              Kết quả đánh giá trên tập Test độc lập chủ thể (`train ∩ val ∩ test = ∅`). Hợp nhất SP-BEF trên Virtual Learner đạt{' '}
+              <strong>AUROC = 0.9383, AUPRC = 0.9131, ECE = 0.0655</strong>.
+            </Text>
+            <Table
+              dataSource={LLR_DISTRIBUTION_DATA}
+              columns={llrColumns}
+              pagination={false}
+              size="small"
+              bordered
+            />
           </div>
         </Col>
 
@@ -325,7 +502,7 @@ export default function AiSettings() {
                   2. Khởi tạo Dữ liệu Mẫu Chuẩn (`seed-data`)
                 </div>
                 <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-                  Tạo dữ liệu mẫu đầy đủ cho Khoa, Ngành, Học kỳ, Khóa học, Phân đoạn VideoSegments, Đề thi thích ứng và Lịch sử Bối rối.
+                  Tạo dữ liệu mẫu đầy đủ cho Khoa, Ngành, Học kỳ, 3 Khóa học, Phân đoạn VideoSegments, Coding Labs và Lịch sử Bối rối.
                 </Text>
                 <Button
                   block
@@ -341,21 +518,27 @@ export default function AiSettings() {
 
             <Divider />
 
-            <Descriptions title="Thông số Kiến trúc AI Hiện hành" column={1} size="small" bordered>
-              <Descriptions.Item label="Client CV Worker">
-                <Tag color="green">MediaPipe 478 3D + EAR/Gaze</Tag>
+            <Descriptions title="Thông số Kiến trúc SP-BEF V2 Hiện hành" column={1} size="small" bordered>
+              <Descriptions.Item label="On-Device Face ONNX">
+                <Tag color="green">sp_bef_face.onnx (864B · &lt;0.1ms)</Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="Temporal ONNX">
-                <code>confusion_bilstm.onnx</code> (Seq=5)
+              <Descriptions.Item label="Personal Baseline (C2)">
+                Rolling 60–90s Z-Score trên trình duyệt
               </Descriptions.Item>
-              <Descriptions.Item label="Biometric Guard">
-                <code>mobilefacenet.onnx</code> (192-d, 3 góc)
+              <Descriptions.Item label="Dynamic Reliability (C4)">
+                <code>r_face(t)</code> (Luminance · Pose · Presence)
+              </Descriptions.Item>
+              <Descriptions.Item label="Segment Prior (C3)">
+                <code>π_s</code> từ mật độ tua lại MOOCCubeX
+              </Descriptions.Item>
+              <Descriptions.Item label="Temporal Filter (C5)">
+                2-State HMM + Hysteresis (0.62 / 0.42)
               </Descriptions.Item>
               <Descriptions.Item label="RAG Strategy">
                 3-Tier (`pgvector` &rarr; `Segment` &rarr; `Slice`)
               </Descriptions.Item>
               <Descriptions.Item label="Cập nhật lần cuối">
-                {settingsMeta?.updated_at || '2026-10-23 09:00:00'}
+                {settingsMeta?.updated_at || '2026-10-26 10:00:00'}
               </Descriptions.Item>
             </Descriptions>
           </div>

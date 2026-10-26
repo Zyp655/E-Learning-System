@@ -28,40 +28,37 @@ import type {
   TutorPersona,
 } from './types';
 
-/**
- * Local 3-Layer MLP (12 -> 64 -> 32 -> 16 -> 1) + StandardScaler inference
- * Matches `04_train_multimodal_12features.py` & Go `ConfusionPredictor` in < 1ms.
- */
-export function evaluateMultimodalMlpLocal(features: MultimodalFeatures12): {
-  probability: number;
-  level: 'none' | 'mild' | 'moderate' | 'high';
-  modelType: string;
-} {
-  // Normalized feature contributions calibrated from DAiSEE + LMS 12-feature weights
-  const zPause = Math.min(features.pause_count / 4, 2.0) * 0.14;
-  const zLongPause = Math.min(features.long_pause_count / 2, 2.0) * 0.16;
-  const zRewind = Math.min(features.rewind_count / 3, 2.0) * 0.22;
-  const zSameSpot = Math.min(features.rewind_same_spot / 2, 2.5) * 0.28;
-  const zSpeed = features.speed_decrease ? 0.12 : 0;
-  const zConfused = Math.min(features.confused_ratio * 2.2, 1.5) * 0.35;
-  const zFrustrated = Math.min(features.frustrated_ratio * 2.5, 1.5) * 0.26;
-  const zStreak = Math.min(features.neg_emotion_streak / 4, 2.0) * 0.2;
-  const zQuizPenalty = features.quiz_score < 60 ? ((60 - features.quiz_score) / 60) * 0.15 : -0.08;
-
-  const logit =
-    -1.15 +
-    (zPause + zLongPause + zRewind + zSameSpot + zSpeed + zConfused + zFrustrated + zStreak + zQuizPenalty) * 2.35;
-  const prob = Number((1 / (1 + Math.exp(-logit))).toFixed(3));
-
-  const level =
-    prob >= 0.75 ? 'high' : prob >= 0.6 ? 'moderate' : prob >= 0.38 ? 'mild' : 'none';
-
-  return {
-    probability: prob,
-    level,
-    modelType: 'mlp_64_32_16_multimodal',
-  };
+export interface ConfusionPredictResult {
+  status: 'ok' | 'indeterminate';
+  level: 'none' | 'mild' | 'moderate' | 'high' | 'unknown';
+  triggerSource: 'sp_bef' | 'indeterminate' | string;
+  isConfused: boolean;
+  shouldIntervene: boolean;
+  probability: number | null;
+  posteriorProb?: number | null;
+  priorProb?: number | null;
+  llrFace?: number;
+  llrBeh?: number;
+  llrQuiz?: number;
+  rFace?: number;
+  rBeh?: number;
+  rQuiz?: number;
+  contribFace?: number;
+  contribBeh?: number;
+  contribQuiz?: number;
+  segmentPrior?: number;
 }
+
+export const INDETERMINATE_PREDICTION_STATE: ConfusionPredictResult = {
+  status: 'indeterminate',
+  level: 'unknown',
+  triggerSource: 'indeterminate',
+  isConfused: false,
+  shouldIntervene: false,
+  probability: null,
+  posteriorProb: null,
+  priorProb: null,
+};
 
 export const lmsApi = {
   getProfile: () => apiFetch('/v1/user/profile', { method: 'GET' }, MOCK_STUDENT_PROFILE),
@@ -286,14 +283,18 @@ export const lmsApi = {
       },
     ),
 
-  predictConfusion: (features: MultimodalFeatures12) =>
-    apiFetch(
+  predictConfusion: (
+    payload: MultimodalFeatures12 | Record<string, unknown>,
+  ): Promise<ConfusionPredictResult> =>
+    apiFetch<ConfusionPredictResult>(
       '/v1/student/confusion/predict',
       {
         method: 'POST',
-        body: JSON.stringify({ features, threshold: 0.6 }),
+        body: JSON.stringify(
+          'pause_count' in payload ? { features: payload, threshold: 0.62 } : payload,
+        ),
       },
-      () => evaluateMultimodalMlpLocal(features),
+      () => ({ ...INDETERMINATE_PREDICTION_STATE }),
     ),
 
   explainConfusion: (payload: {

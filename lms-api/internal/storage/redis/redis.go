@@ -56,6 +56,13 @@ func Get(ctx context.Context, key string) (string, bool) {
 	return "", false
 }
 
+func Del(ctx context.Context, key string) {
+	if client != nil {
+		_ = client.Del(ctx, key).Err()
+	}
+	memFallback.Delete(key)
+}
+
 func CloseRedis() {
 	if client != nil {
 		_ = client.Close()

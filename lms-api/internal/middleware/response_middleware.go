@@ -74,12 +74,14 @@ func (m *middlewareStr) ResponseMiddleware() func(r *ghttp.Request) {
 
 		httpStatus := http.StatusOK
 		length := len(strconv.Itoa(code.Code()))
-		if length == 5 {
+		if length == 3 {
+			httpStatus = code.Code()
+		} else if length == 5 {
 			httpStatus = code.Code() / 100
 		} else if length == 6 {
 			httpStatus = code.Code() / 1000
 		}
-		if code.Code() == 51 {
+		if code.Code() == 51 || code.Code() == 52 || code.Code() == 53 || code.Code() == 60 {
 			httpStatus = http.StatusBadRequest
 		}
 

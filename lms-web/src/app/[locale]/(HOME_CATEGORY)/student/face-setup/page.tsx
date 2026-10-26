@@ -16,7 +16,6 @@ import { useAccountStore } from '@/store/useAccountStore';
 import { lmsApi } from '@/api';
 import {
   RealFaceTrackerSession,
-  buildAnchored478Landmarks,
   drawRealFaceLandmarksOverlay,
   extract192dBiometricDescriptor,
   type Point3D,
@@ -99,20 +98,10 @@ export default function StudentFaceSetupPage() {
     async (stepConfig: AngleStepConfig, overrideYaw?: number) => {
       setCapturingStep(stepConfig.step);
       const yawToUse = overrideYaw ?? (streamingLive ? latestYawRef.current : stepConfig.defaultYaw);
-      const pts: Point3D[] = buildAnchored478Landmarks(
-        0.5,
-        0.5,
-        0.16,
-        0.28,
-        yawToUse,
-        latestPitchRef.current,
-        0.26,
-        0.14,
-      );
       const vec192 =
         latestEmbeddingRef.current.length === 192
           ? latestEmbeddingRef.current
-          : extract192dBiometricDescriptor(pts, 0.14, 0.12, 0.26);
+          : extract192dBiometricDescriptor([]);
 
       // Save to backend /v1/student/face-embedding
       await lmsApi.saveFaceEmbedding({
@@ -242,7 +231,7 @@ export default function StudentFaceSetupPage() {
       } else {
         ctx.fillStyle = '#111827';
         ctx.fillRect(0, 0, w, h);
-        landmarks = buildAnchored478Landmarks(0.5, 0.52, 0.16, 0.28, yaw, pitch, ear, 0.14);
+        landmarks = [];
       }
 
       drawRealFaceLandmarksOverlay(ctx, w, h, landmarks, {

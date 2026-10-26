@@ -11,7 +11,8 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",
     "lint": "next lint",
-    "lint:ds": "node scripts/design-system/lint.mjs"
+    "lint:ds": "node scripts/design-system/lint.mjs",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.5",
@@ -32,6 +33,7 @@
     "@types/react-dom": "^18.3.1",
     "postcss": "^8.5.4",
     "tailwindcss": "^4.1.11",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.7"
   }
 }

@@ -1,6 +1,15 @@
 'use client';
 
 import type { EmotionLabel } from '@/api/types';
+import {
+  PersonalBaselineCalibrator,
+  SP_BEF_PARAMS,
+  aggregateClipWindow,
+  clipVal,
+  computeFrameReliability,
+  predictLinearCalibratedBranch,
+  type FrameTelemetryStat,
+} from './spBefCore';
 
 export interface Point3D {
   x: number; // normalized [0..1]
@@ -9,9 +18,9 @@ export interface Point3D {
 }
 
 export interface RealCvFrameResult {
-  engineMode: 'mediapipe_wasm' | 'pixel_cv_fallback' | 'synthetic_sim';
+  engineMode: 'mediapipe_wasm' | 'no_stream';
   faceDetected: boolean;
-  landmarks: Point3D[]; // 478 normalized 3D landmarks (or empty when 0 faces)
+  landmarks: Point3D[]; // 478 normalized 3D landmarks (or empty when 0 faces / no live video)
   avgLuminance: number; // 0..255 computed from ctx.getImageData
   lowLightBoostActive: boolean; // avgLuminance < 95
   earLeft: number;
@@ -22,15 +31,21 @@ export interface RealCvFrameResult {
   gazeStill: boolean;
   eyeLocked: boolean;
   gazeBoost: number;
-  browFurrowScore: number; // AU4: browDownLeft, browDownRight, browInnerUp
+  browFurrowScore: number; // AU4: browDownLeft, browDownRight, browInnerUp + geometric compression
   eyeSquintScore: number; // AU7: eyeSquintLeft, eyeSquintRight
   mouthTensionScore: number; // mouthPressLeft/Right, mouthFrownLeft/Right
   headYawDeg: number;
   headPitchDeg: number;
   emotion: EmotionLabel;
   confidence: number;
-  embedding192: number[]; // L2-normalized 192-d vector
+  embedding192: number[]; // L2-normalized 192-d pure 3D geometric descriptor
   cosineSimilarity: number;
+  // SP-BEF Face Branch outputs (C1, C2, C4)
+  rFace: number;
+  llrFace: number;
+  faceCalProb: number;
+  faceRawProb: number;
+  personalBaselineReady: boolean;
 }
 
 // MediaPipe canonical eye indices for Eye Aspect Ratio (EAR)
@@ -42,7 +57,9 @@ export const FACE_OVAL_INDICES = [
 ] as const;
 export const LEFT_EYEBROW_INDICES = [70, 63, 105, 66, 107] as const;
 export const RIGHT_EYEBROW_INDICES = [336, 296, 334, 293, 300] as const;
-export const LIPS_OUTER_INDICES = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146] as const;
+export const LIPS_OUTER_INDICES = [
+  61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146,
+] as const;
 
 interface MediaPipeBlendshapeCategory {
   categoryName: string;
@@ -64,9 +81,8 @@ let mediaPipeLoading = false;
 let mediaPipeFailed = false;
 
 /**
- * Dynamically loads @mediapipe/tasks-vision (FilesetResolver.forVisionTasks + FaceLandmarker.createFromOptions)
- * with outputFaceBlendshapes: true and outputFacialTransformationMatrixes: true.
- * Falls back gracefully to real pixel-based CV tracking if offline or WebGL is restricted.
+ * Dynamically loads @mediapipe/tasks-vision (0.10.14) and initializes FaceLandmarker
+ * from local `/models/face_landmarker.task` first, with official Google Storage CDN fallback.
  */
 export async function ensureMediaPipeFaceLandmarker(): Promise<MediaPipeFaceLandmarker | null> {
   if (mediaPipeLandmarker) return mediaPipeLandmarker;
@@ -82,17 +98,30 @@ export async function ensureMediaPipeFaceLandmarker(): Promise<MediaPipeFaceLand
     const filesetResolver = await FilesetResolver.forVisionTasks(
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
     );
-    mediaPipeLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
-      baseOptions: {
-        modelAssetPath:
-          'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-        delegate: 'GPU',
-      },
-      outputFaceBlendshapes: true,
-      outputFacialTransformationMatrixes: true,
-      runningMode: 'VIDEO',
-      numFaces: 1,
-    });
+    try {
+      mediaPipeLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: {
+          modelAssetPath: '/models/face_landmarker.task',
+          delegate: 'GPU',
+        },
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: true,
+        runningMode: 'VIDEO',
+        numFaces: 1,
+      });
+    } catch {
+      mediaPipeLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          delegate: 'GPU',
+        },
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: true,
+        runningMode: 'VIDEO',
+        numFaces: 1,
+      });
+    }
     mediaPipeLoading = false;
     return mediaPipeLandmarker;
   } catch {
@@ -115,8 +144,8 @@ function dist2D(a: Point3D, b: Point3D, widthPx = 1, heightPx = 1): number {
 export function computeEyeAspectRatio(
   landmarks: Point3D[],
   indices: readonly [number, number, number, number, number, number],
-  widthPx: number,
-  heightPx: number,
+  widthPx = 1,
+  heightPx = 1,
 ): number {
   const p1 = landmarks[indices[0]];
   const p2 = landmarks[indices[1]];
@@ -124,55 +153,32 @@ export function computeEyeAspectRatio(
   const p4 = landmarks[indices[3]];
   const p5 = landmarks[indices[4]];
   const p6 = landmarks[indices[5]];
-  if (!p1 || !p2 || !p3 || !p4 || !p5 || !p6) return 0.26;
+  if (!p1 || !p2 || !p3 || !p4 || !p5 || !p6) return 0;
 
   const v1 = dist2D(p2, p6, widthPx, heightPx);
   const v2 = dist2D(p3, p5, widthPx, heightPx);
   const h = Math.max(dist2D(p1, p4, widthPx, heightPx), 1e-5);
-  return Number(Math.max(0.08, Math.min(0.42, (v1 + v2) / (2.0 * h))).toFixed(4));
+  return Number(Math.max(0.08, Math.min(0.45, (v1 + v2) / (2.0 * h))).toFixed(4));
 }
 
 /**
  * Computes real average luminance (0..255) from canvas pixel RGB values via ctx.getImageData.
  */
 export function computeCanvasLuminance(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | null,
   width: number,
   height: number,
-): {
-  avgLuminance: number;
-  skinDetected: boolean;
-  faceCenterX: number;
-  faceCenterY: number;
-  faceRadiusX: number;
-  faceRadiusY: number;
-  leftHalfLuma: number;
-  rightHalfLuma: number;
-  upperBrowGradient: number;
-  eyeOpenGradient: number;
-} {
+): { avgLuminance: number } {
+  if (!ctx || width <= 0 || height <= 0) {
+    return { avgLuminance: 0 };
+  }
   try {
     const img = ctx.getImageData(0, 0, width, height);
     const data = img.data;
     let totalLuma = 0;
     let sampleCount = 0;
 
-    let skinXSum = 0;
-    let skinYSum = 0;
-    let skinCount = 0;
-    let minSkinX = width;
-    let maxSkinX = 0;
-    let minSkinY = height;
-    let maxSkinY = 0;
-
-    let leftLumaSum = 0;
-    let leftCount = 0;
-    let rightLumaSum = 0;
-    let rightCount = 0;
-    let browGradSum = 0;
-    let browGradCount = 0;
-
-    const step = 4; // Sample every 4th pixel for < 0.8ms execution
+    const step = 4;
     for (let y = 8; y < height - 8; y += step) {
       for (let x = 8; x < width - 8; x += step) {
         const idx = (y * width + x) * 4;
@@ -182,211 +188,24 @@ export function computeCanvasLuminance(
         const luma = 0.299 * r + 0.587 * g + 0.114 * b;
         totalLuma += luma;
         sampleCount++;
-
-        // YCbCr + RGB skin-tone & central face region heuristic for real webcam pixel tracking
-        const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-        const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-        const isSkinPixel =
-          r > 55 &&
-          g > 35 &&
-          b > 20 &&
-          r > g &&
-          r > b &&
-          Math.abs(r - g) > 10 &&
-          cr >= 130 &&
-          cr <= 178 &&
-          cb >= 75 &&
-          cb <= 135;
-
-        if (isSkinPixel && x > width * 0.12 && x < width * 0.88 && y > height * 0.08 && y < height * 0.92) {
-          skinXSum += x;
-          skinYSum += y;
-          skinCount++;
-          if (x < minSkinX) minSkinX = x;
-          if (x > maxSkinX) maxSkinX = x;
-          if (y < minSkinY) minSkinY = y;
-          if (y > maxSkinY) maxSkinY = y;
-
-          if (x < width / 2) {
-            leftLumaSum += luma;
-            leftCount++;
-          } else {
-            rightLumaSum += luma;
-            rightCount++;
-          }
-        }
-
-        // Measure horizontal intensity gradient in the eyebrow/forehead zone for AU4 brow furrow
-        if (x > width * 0.32 && x < width * 0.68 && y > height * 0.25 && y < height * 0.48) {
-          const nextIdx = (y * width + (x + step)) * 4;
-          const nextR = data[nextIdx];
-          const diff = Math.abs(r - nextR);
-          browGradSum += diff;
-          browGradCount++;
-        }
       }
     }
 
-    const avgLuminance = sampleCount > 0 ? Math.round(totalLuma / sampleCount) : 120;
-    const skinRatio = sampleCount > 0 ? skinCount / sampleCount : 0;
-    const skinDetected = skinRatio >= 0.035;
-
-    const faceCenterX = skinCount > 0 ? skinXSum / skinCount / width : 0.5;
-    const faceCenterY = skinCount > 0 ? skinYSum / skinCount / height : 0.5;
-    const faceRadiusX =
-      skinCount > 10
-        ? Math.max(0.11, Math.min(0.26, (maxSkinX - minSkinX) / (2.2 * width)))
-        : 0.15;
-    const faceRadiusY =
-      skinCount > 10
-        ? Math.max(0.16, Math.min(0.34, (maxSkinY - minSkinY) / (2.0 * height)))
-        : 0.24;
-
-    const leftHalfLuma = leftCount > 0 ? leftLumaSum / leftCount : avgLuminance;
-    const rightHalfLuma = rightCount > 0 ? rightLumaSum / rightCount : avgLuminance;
-    const upperBrowGradient = browGradCount > 0 ? Math.min(1, browGradSum / browGradCount / 28) : 0.18;
-    const eyeOpenGradient = Math.max(0.19, Math.min(0.31, 0.24 + (upperBrowGradient - 0.2) * 0.08));
-
-    return {
-      avgLuminance,
-      skinDetected,
-      faceCenterX,
-      faceCenterY,
-      faceRadiusX,
-      faceRadiusY,
-      leftHalfLuma,
-      rightHalfLuma,
-      upperBrowGradient,
-      eyeOpenGradient,
-    };
+    const avgLuminance = sampleCount > 0 ? Math.round(totalLuma / sampleCount) : 0;
+    return { avgLuminance };
   } catch {
-    return {
-      avgLuminance: 122,
-      skinDetected: true,
-      faceCenterX: 0.5,
-      faceCenterY: 0.5,
-      faceRadiusX: 0.15,
-      faceRadiusY: 0.24,
-      leftHalfLuma: 120,
-      rightHalfLuma: 120,
-      upperBrowGradient: 0.16,
-      eyeOpenGradient: 0.26,
-    };
+    return { avgLuminance: 0 };
   }
 }
 
 /**
- * Generates a complete 478-landmark 3D mesh anchored at the real detected face center (cx, cy)
- * and head pose (yaw, pitch) when running in pixel-CV fallback mode.
- */
-export function buildAnchored478Landmarks(
-  cx: number,
-  cy: number,
-  rx: number,
-  ry: number,
-  yawDeg: number,
-  pitchDeg: number,
-  earTarget: number,
-  browFurrow: number,
-): Point3D[] {
-  const pts: Point3D[] = new Array(478);
-  const yawShift = (yawDeg / 45) * rx * 0.45;
-  const pitchShift = (pitchDeg / 35) * ry * 0.35;
-
-  // Populate all 478 points along concentric elliptic rings on the detected face
-  for (let i = 0; i < 478; i++) {
-    const angle = (i / 478) * Math.PI * 2;
-    const ring = 0.25 + ((i * 7) % 10) * 0.075;
-    pts[i] = {
-      x: cx + Math.cos(angle) * rx * ring + yawShift * (1 - ring * 0.5),
-      y: cy + Math.sin(angle) * ry * ring + pitchShift,
-      z: -0.05 * Math.cos(angle),
-    };
-  }
-
-  // Face oval contour
-  FACE_OVAL_INDICES.forEach((idx, k) => {
-    const theta = (k / FACE_OVAL_INDICES.length) * Math.PI * 2 - Math.PI / 2;
-    pts[idx] = {
-      x: cx + Math.cos(theta) * rx,
-      y: cy + Math.sin(theta) * ry,
-      z: 0.02,
-    };
-  });
-
-  // Nose tip anchor (Landmark #1)
-  pts[1] = {
-    x: cx + yawShift,
-    y: cy + ry * 0.06 + pitchShift,
-    z: -0.08,
-  };
-
-  // Left eye [33, 160, 158, 133, 153, 144]
-  const lx = cx - rx * 0.38 + yawShift * 0.7;
-  const ly = cy - ry * 0.16 + pitchShift * 0.7;
-  const eyeW = rx * 0.26;
-  const eyeH = eyeW * earTarget;
-  pts[33] = { x: lx - eyeW / 2, y: ly, z: -0.03 };
-  pts[160] = { x: lx - eyeW / 5, y: ly - eyeH, z: -0.03 };
-  pts[158] = { x: lx + eyeW / 5, y: ly - eyeH, z: -0.03 };
-  pts[133] = { x: lx + eyeW / 2, y: ly, z: -0.03 };
-  pts[153] = { x: lx + eyeW / 5, y: ly + eyeH, z: -0.03 };
-  pts[144] = { x: lx - eyeW / 5, y: ly + eyeH, z: -0.03 };
-
-  // Right eye [362, 385, 387, 263, 373, 380]
-  const rEyeX = cx + rx * 0.38 + yawShift * 0.7;
-  const rEyeY = cy - ry * 0.16 + pitchShift * 0.7;
-  pts[362] = { x: rEyeX - eyeW / 2, y: rEyeY, z: -0.03 };
-  pts[385] = { x: rEyeX - eyeW / 5, y: rEyeY - eyeH, z: -0.03 };
-  pts[387] = { x: rEyeX + eyeW / 5, y: rEyeY - eyeH, z: -0.03 };
-  pts[263] = { x: rEyeX + eyeW / 2, y: rEyeY, z: -0.03 };
-  pts[373] = { x: rEyeX + eyeW / 5, y: rEyeY + eyeH, z: -0.03 };
-  pts[380] = { x: rEyeX - eyeW / 5, y: rEyeY + eyeH, z: -0.03 };
-
-  // Eyebrows (shifted inward/downward by AU4 browFurrow)
-  const furrowOffset = browFurrow * ry * 0.07;
-  LEFT_EYEBROW_INDICES.forEach((idx, k) => {
-    const t = k / (LEFT_EYEBROW_INDICES.length - 1);
-    pts[idx] = {
-      x: lx - eyeW * 0.6 + t * eyeW * 1.2 + furrowOffset * 0.4,
-      y: ly - ry * 0.15 + t * furrowOffset,
-      z: -0.04,
-    };
-  });
-  RIGHT_EYEBROW_INDICES.forEach((idx, k) => {
-    const t = k / (RIGHT_EYEBROW_INDICES.length - 1);
-    pts[idx] = {
-      x: rEyeX - eyeW * 0.6 + t * eyeW * 1.2 - furrowOffset * 0.4,
-      y: rEyeY - ry * 0.15 + (1 - t) * furrowOffset,
-      z: -0.04,
-    };
-  });
-
-  // Outer lips
-  LIPS_OUTER_INDICES.forEach((idx, k) => {
-    const theta = (k / LIPS_OUTER_INDICES.length) * Math.PI * 2;
-    pts[idx] = {
-      x: cx + yawShift * 0.8 + Math.cos(theta) * rx * 0.32,
-      y: cy + ry * 0.42 + pitchShift * 0.8 + Math.sin(theta) * ry * 0.08,
-      z: -0.04,
-    };
-  });
-
-  return pts;
-}
-
-/**
- * Extracts a 192-d L2-normalized geometric + blendshape biometric descriptor
+ * Extracts a 192-d L2-normalized pure geometric biometric descriptor
  * from the 478 3D landmarks (Nose-Centered + Inter-Ocular Distance normalized).
+ * Strictly computed from real 3D landmark geometry: ((pt.x - nose.x)/iod, (pt.y - nose.y)/iod, (pt.z - nose.z)/iod).
  */
-export function extract192dBiometricDescriptor(
-  landmarks: Point3D[],
-  browFurrowScore: number,
-  eyeSquintScore: number,
-  earAvg: number,
-): number[] {
-  if (landmarks.length < 400) {
-    return new Array(192).fill(0);
+export function extract192dBiometricDescriptor(landmarks: Point3D[]): number[] {
+  if (!landmarks || landmarks.length < 468) {
+    return [];
   }
   const nose = landmarks[1] || { x: 0.5, y: 0.5, z: 0 };
   const leftOuter = landmarks[33] || { x: 0.4, y: 0.45, z: 0 };
@@ -394,31 +213,20 @@ export function extract192dBiometricDescriptor(
   const iod = Math.max(Math.hypot(leftOuter.x - rightOuter.x, leftOuter.y - rightOuter.y), 1e-4);
 
   const raw: number[] = new Array(192);
-  // First 180 dimensions: 60 key invariant facial landmarks * (dx, dy, dz) relative to Nose Tip
-  for (let i = 0; i < 60; i++) {
+  // 64 canonical landmarks * 3 coordinates (dx, dy, dz) relative to Nose Tip (#1) normalized by IOD = 192 dimensions
+  for (let i = 0; i < 64; i++) {
     const lmIdx = (i * 7 + 1) % landmarks.length;
     const pt = landmarks[lmIdx] || nose;
-    // Blend invariant facial geometry with stable biometric signature
-    const geomX = (pt.x - nose.x) / iod;
-    const geomY = (pt.y - nose.y) / iod;
-    const geomZ = (pt.z - nose.z) / iod;
     const baseIdx = i * 3;
-    raw[baseIdx] = Math.sin((baseIdx + 1) * 0.41 + 17.3) * 0.55 + geomX * 0.12;
-    raw[baseIdx + 1] = Math.cos((baseIdx + 2) * 0.19) * 0.55 + geomY * 0.12;
-    raw[baseIdx + 2] = Math.sin((baseIdx + 3) * 0.41 + 17.3) * 0.55 + geomZ * 0.12;
+    raw[baseIdx] = (pt.x - nose.x) / iod;
+    raw[baseIdx + 1] = (pt.y - nose.y) / iod;
+    raw[baseIdx + 2] = ((pt.z ?? 0) - (nose.z ?? 0)) / iod;
   }
 
-  // Last 12 dimensions: ocular & blendshape invariants
-  for (let j = 180; j < 192; j++) {
-    raw[j] =
-      Math.sin(17.3 + j * 0.41) * 0.6 +
-      Math.cos(j * 0.19) * 0.35 +
-      (earAvg - 0.25) * 0.05 +
-      (browFurrowScore - 0.15) * 0.02 +
-      (eyeSquintScore - 0.12) * 0.02;
+  const norm = Math.sqrt(raw.reduce((acc, v) => acc + v * v, 0));
+  if (norm <= 1e-9) {
+    return [];
   }
-
-  const norm = Math.sqrt(raw.reduce((acc, v) => acc + v * v, 0)) || 1;
   return raw.map((v) => Number((v / norm).toFixed(5)));
 }
 
@@ -430,11 +238,11 @@ export function computeMaxCosineSimilarity(
   liveVec: number[],
   registered: { front: number[] | null; left: number[] | null; right: number[] | null },
 ): number {
-  if (liveVec.length !== 192) return 0;
+  if (!liveVec || liveVec.length !== 192) return 0;
   const candidates = [registered.front, registered.left, registered.right].filter(
     (v): v is number[] => Array.isArray(v) && v.length === 192,
   );
-  if (candidates.length === 0) return 0.86;
+  if (candidates.length === 0) return 0;
 
   let maxSim = -1;
   for (const reg of candidates) {
@@ -446,26 +254,109 @@ export function computeMaxCosineSimilarity(
       normA += liveVec[i] * liveVec[i];
       normB += reg[i] * reg[i];
     }
-    const sim = dot / (Math.sqrt(normA || 1) * Math.sqrt(normB || 1));
+    const denom = Math.sqrt(normA) * Math.sqrt(normB);
+    const sim = denom > 1e-9 ? dot / denom : 0;
     if (sim > maxSim) maxSim = sim;
   }
   return Number(Math.max(0, Math.min(0.99, maxSim)).toFixed(3));
 }
 
 /**
- * Stateful tracker that maintains the 10-frame EAR sliding buffer and 5-frame Nose Tip buffer
- * to compute real earVariance and noseDriftPx on every frame.
+ * Stateful tracker that maintains:
+ * - 10-second sliding frame buffer (`frameWindow`) for `aggregateClipWindow`
+ * - On-device `PersonalBaselineCalibrator` (C2)
+ * - Dynamic Frame Reliability `rFace` (C4)
+ * - Calibrated Face Branch LLR `llrFace` (C1)
  */
 export class RealFaceTrackerSession {
   private earHistory: number[] = [];
   private noseHistory: { x: number; y: number }[] = [];
+  private frameWindow: { timestampMs: number; stat: FrameTelemetryStat }[] = [];
+  private readonly baselineCalibrator: PersonalBaselineCalibrator;
+
+  constructor(minBaselineSamples = 5, baselineDurationSec = 60) {
+    this.baselineCalibrator = new PersonalBaselineCalibrator(
+      minBaselineSamples,
+      baselineDurationSec,
+    );
+  }
+
+  public getBaselineCalibrator(): PersonalBaselineCalibrator {
+    return this.baselineCalibrator;
+  }
+
+  public reset(): void {
+    this.earHistory = [];
+    this.noseHistory = [];
+    this.frameWindow = [];
+    this.baselineCalibrator.reset();
+  }
+
+  private pushAndAggregateWindow(
+    stat: FrameTelemetryStat,
+    nowMs: number,
+  ): {
+    rFace: number;
+    llrFace: number;
+    faceCalProb: number;
+    faceRawProb: number;
+    personalBaselineReady: boolean;
+  } {
+    this.frameWindow.push({ timestampMs: nowMs, stat });
+    this.frameWindow = this.frameWindow.filter((w) => nowMs - w.timestampMs <= 10_000);
+
+    if (!stat.detected) {
+      return {
+        rFace: 0.0,
+        llrFace: 0.0,
+        faceCalProb: 0.0,
+        faceRawProb: 0.0,
+        personalBaselineReady: this.baselineCalibrator.isReady(),
+      };
+    }
+
+    const agg = aggregateClipWindow(this.frameWindow.map((w) => w.stat));
+    const frameR = computeFrameReliability(
+      agg.face_present_ratio,
+      stat.luminance,
+      Math.abs(stat.head_yaw_deg ?? 0),
+      Math.abs(stat.head_pitch_deg ?? 0),
+      1.0,
+    );
+
+    if (frameR <= 0.0) {
+      return {
+        rFace: 0.0,
+        llrFace: 0.0,
+        faceCalProb: 0.0,
+        faceRawProb: 0.0,
+        personalBaselineReady: this.baselineCalibrator.isReady(),
+      };
+    }
+
+    this.baselineCalibrator.observe(agg, frameR, nowMs);
+    const faceVec20 = this.baselineCalibrator.build20FaceModelVector(agg, frameR);
+    const { rawProb, calProb, llr } = predictLinearCalibratedBranch(
+      faceVec20,
+      SP_BEF_PARAMS.branches.face,
+    );
+
+    return {
+      rFace: frameR,
+      llrFace: llr,
+      faceCalProb: calProb,
+      faceRawProb: rawProb,
+      personalBaselineReady: this.baselineCalibrator.isReady(),
+    };
+  }
 
   public async processFrame(
     video: HTMLVideoElement | null,
-    ctx: CanvasRenderingContext2D,
+    ctx: CanvasRenderingContext2D | null,
     canvasWidth: number,
     canvasHeight: number,
     registeredEmbeddings: { front: number[] | null; left: number[] | null; right: number[] | null },
+    nowMs: number = Date.now(),
   ): Promise<RealCvFrameResult> {
     const hasLiveVideo = Boolean(
       video && video.readyState >= 2 && video.videoWidth > 0 && !video.paused && !video.ended,
@@ -473,19 +364,18 @@ export class RealFaceTrackerSession {
 
     const pixelStats = computeCanvasLuminance(ctx, canvasWidth, canvasHeight);
     const avgLuminance = pixelStats.avgLuminance;
-    const lowLightBoostActive = avgLuminance < 95;
+    const lowLightBoostActive = hasLiveVideo && avgLuminance > 0 && avgLuminance < 95;
 
-    let engineMode: RealCvFrameResult['engineMode'] = hasLiveVideo
-      ? 'pixel_cv_fallback'
-      : 'synthetic_sim';
-    let faceDetected = hasLiveVideo ? pixelStats.skinDetected : true;
+    let engineMode: RealCvFrameResult['engineMode'] = 'no_stream';
+    let faceDetected = false;
     let landmarks: Point3D[] = [];
-    let browFurrowScore = 0.16;
-    let eyeSquintScore = 0.12;
-    let mouthTensionScore = 0.1;
-    let smileScore = 0.15;
-    let headYawDeg = -1.5;
-    let headPitchDeg = 1.2;
+    let browFurrowScore = 0;
+    let eyeSquintScore = 0;
+    let mouthTensionScore = 0;
+    let smileScore = 0;
+    let headYawDeg = 0;
+    let headPitchDeg = 0;
+    let iod = 0.145;
 
     if (hasLiveVideo && video) {
       const mp = await ensureMediaPipeFaceLandmarker();
@@ -493,87 +383,95 @@ export class RealFaceTrackerSession {
         try {
           const res = mp.detectForVideo(video, performance.now());
           engineMode = 'mediapipe_wasm';
-          if (res.faceLandmarks && res.faceLandmarks.length > 0 && res.faceLandmarks[0].length >= 468) {
+          if (
+            res.faceLandmarks &&
+            res.faceLandmarks.length > 0 &&
+            res.faceLandmarks[0].length >= 468
+          ) {
             faceDetected = true;
             landmarks = res.faceLandmarks[0];
 
-            // Extract real Blendshapes (AU4 brow furrow, AU7 eye squint, mouth press/frown)
             const cats = res.faceBlendshapes?.[0]?.categories || [];
             const getBs = (name: string) => cats.find((c) => c.categoryName === name)?.score ?? 0;
+
+            const leftOuter = landmarks[33];
+            const rightOuter = landmarks[263];
+            iod = Math.max(
+              Math.hypot(leftOuter.x - rightOuter.x, leftOuter.y - rightOuter.y),
+              1e-4,
+            );
+            const browDistNorm =
+              Math.hypot(
+                landmarks[107].x - landmarks[336].x,
+                landmarks[107].y - landmarks[336].y,
+              ) / iod;
+            const browEyeV =
+              (landmarks[159].y - landmarks[65].y + (landmarks[386].y - landmarks[295].y)) /
+              (2.0 * iod);
+            const geomFurrow = clipVal(
+              (0.36 - browEyeV) * 2.5 + (0.28 - browDistNorm) * 2.0,
+              0.0,
+              1.0,
+            );
 
             const browDownL = getBs('browDownLeft');
             const browDownR = getBs('browDownRight');
             const browInnerUp = getBs('browInnerUp');
             browFurrowScore = Number(
-              Math.min(1, (browDownL + browDownR) * 0.65 + browInnerUp * 0.5).toFixed(3),
+              Math.min(
+                1.0,
+                (browDownL + browDownR) * 0.55 + browInnerUp * 0.4 + geomFurrow * 0.35,
+              ).toFixed(4),
             );
 
-            const eyeSquintL = getBs('eyeSquintLeft');
-            const eyeSquintR = getBs('eyeSquintRight');
-            eyeSquintScore = Number(Math.min(1, (eyeSquintL + eyeSquintR) * 0.6).toFixed(3));
+            eyeSquintScore = Number(
+              Math.min(
+                1.0,
+                (getBs('eyeSquintLeft') + getBs('eyeSquintRight')) * 0.55 +
+                  (getBs('cheekSquintLeft') + getBs('cheekSquintRight')) * 0.25,
+              ).toFixed(4),
+            );
 
             const mouthPress = (getBs('mouthPressLeft') + getBs('mouthPressRight')) * 0.5;
             const mouthFrown = (getBs('mouthFrownLeft') + getBs('mouthFrownRight')) * 0.5;
-            mouthTensionScore = Number(Math.min(1, mouthPress * 0.6 + mouthFrown * 0.6).toFixed(3));
-            smileScore = Number(((getBs('mouthSmileLeft') + getBs('mouthSmileRight')) * 0.5).toFixed(3));
+            const jawOpen = getBs('jawOpen');
+            mouthTensionScore = Number(
+              Math.min(1.0, mouthPress * 0.55 + mouthFrown * 0.55 + jawOpen * 0.15).toFixed(4),
+            );
+            smileScore = Number(
+              ((getBs('mouthSmileLeft') + getBs('mouthSmileRight')) * 0.5).toFixed(4),
+            );
 
-            // Estimate real head yaw & pitch from nose tip (#1) relative to left/right eye outer corners (#33, #263)
             const nose = landmarks[1];
-            const leftEye = landmarks[33];
-            const rightEye = landmarks[263];
-            if (nose && leftEye && rightEye) {
-              const eyeMidX = (leftEye.x + rightEye.x) / 2;
-              const eyeMidY = (leftEye.y + rightEye.y) / 2;
-              const eyeSpan = Math.max(Math.abs(rightEye.x - leftEye.x), 0.05);
-              headYawDeg = Number((((nose.x - eyeMidX) / eyeSpan) * 55).toFixed(1));
-              headPitchDeg = Number((((nose.y - eyeMidY) / eyeSpan - 0.35) * 45).toFixed(1));
+            if (nose && leftOuter && rightOuter) {
+              const eyeMidX = 0.5 * (leftOuter.x + rightOuter.x);
+              const eyeMidY = 0.5 * (leftOuter.y + rightOuter.y);
+              headYawDeg = Number((((nose.x - eyeMidX) / iod) * 55.0).toFixed(2));
+              headPitchDeg = Number((((nose.y - eyeMidY) / iod - 0.35) * 45.0).toFixed(2));
             }
           } else {
-            // MediaPipe explicitly sees 0 faces in the live webcam stream
             faceDetected = false;
             landmarks = [];
           }
         } catch {
-          // Fallback to pixel CV if detectForVideo throws on frame timestamp
-        }
-      }
-
-      if (engineMode === 'pixel_cv_fallback') {
-        if (!faceDetected) {
+          faceDetected = false;
           landmarks = [];
-        } else {
-          // Compute real head yaw & pitch from detected skin centroid & left/right luminance asymmetry
-          const offsetX = pixelStats.faceCenterX - 0.5;
-          const offsetY = pixelStats.faceCenterY - 0.5;
-          const lumaAsym = (pixelStats.leftHalfLuma - pixelStats.rightHalfLuma) / 255;
-          headYawDeg = Number((offsetX * 72 + lumaAsym * 28).toFixed(1));
-          headPitchDeg = Number((offsetY * 50).toFixed(1));
-          browFurrowScore = Number(pixelStats.upperBrowGradient.toFixed(3));
-          eyeSquintScore = Number(Math.min(1, pixelStats.upperBrowGradient * 0.85).toFixed(3));
-          landmarks = buildAnchored478Landmarks(
-            pixelStats.faceCenterX,
-            pixelStats.faceCenterY,
-            pixelStats.faceRadiusX,
-            pixelStats.faceRadiusY,
-            headYawDeg,
-            headPitchDeg,
-            pixelStats.eyeOpenGradient,
-            browFurrowScore,
-          );
         }
       }
-    } else {
-      // Synthetic simulation canvas when user has no physical webcam attached
-      landmarks = buildAnchored478Landmarks(0.5, 0.52, 0.15, 0.28, -1.6, 1.1, 0.26, 0.15);
     }
 
-    if (!faceDetected || landmarks.length === 0) {
+    // Strict P1.1 guard: when no live video or 0 faces detected, never fabricate landmarks or face presence
+    if (!hasLiveVideo || !faceDetected || landmarks.length < 468) {
+      const noFaceSpBef = this.pushAndAggregateWindow(
+        { detected: false, luminance: avgLuminance },
+        nowMs,
+      );
       return {
         engineMode,
         faceDetected: false,
         landmarks: [],
         avgLuminance,
-        lowLightBoostActive,
+        lowLightBoostActive: false,
         earLeft: 0,
         earRight: 0,
         earAvg: 0,
@@ -588,18 +486,22 @@ export class RealFaceTrackerSession {
         headYawDeg: 0,
         headPitchDeg: 0,
         emotion: 'no_face',
-        confidence: 0.99,
+        confidence: 0,
         embedding192: [],
         cosineSimilarity: 0,
+        rFace: 0.0,
+        llrFace: 0.0,
+        faceCalProb: 0.0,
+        faceRawProb: 0.0,
+        personalBaselineReady: noFaceSpBef.personalBaselineReady,
       };
     }
 
-    // Compute real Left & Right EAR from MediaPipe indices
-    const earLeft = computeEyeAspectRatio(landmarks, LEFT_EYE_INDICES, canvasWidth, canvasHeight);
-    const earRight = computeEyeAspectRatio(landmarks, RIGHT_EYE_INDICES, canvasWidth, canvasHeight);
-    const earAvg = Number(((earLeft + earRight) / 2).toFixed(3));
+    // Compute real Left & Right EAR from MediaPipe indices (normalized coordinates matching Python _compute_ear)
+    const earLeft = computeEyeAspectRatio(landmarks, LEFT_EYE_INDICES, 1, 1);
+    const earRight = computeEyeAspectRatio(landmarks, RIGHT_EYE_INDICES, 1, 1);
+    const earAvg = Number(((earLeft + earRight) / 2).toFixed(4));
 
-    // Update 10-frame EAR sliding buffer for real earVariance
     this.earHistory.push(earAvg);
     if (this.earHistory.length > 10) this.earHistory.shift();
     const earMean =
@@ -611,7 +513,6 @@ export class RealFaceTrackerSession {
       ).toFixed(5),
     );
 
-    // Update 5-frame Nose Tip (#1) buffer for real Euclidean noseDriftPx
     const nosePt = landmarks[1] || { x: 0.5, y: 0.5, z: 0 };
     const nosePx = { x: nosePt.x * canvasWidth, y: nosePt.y * canvasHeight };
     this.noseHistory.push(nosePx);
@@ -630,37 +531,52 @@ export class RealFaceTrackerSession {
     const eyeLocked = gazeStill && earAvg > 0.22 && earVariance < 0.002;
     const gazeBoost = eyeLocked ? 1.6 : gazeStill ? 1.3 : 1.0;
 
-    // Classify real-time emotion from Blendshapes + EAR + Head Pose
-    let emotion: EmotionLabel = 'focused';
-    let confidence = 0.86;
+    const spBefOut = this.pushAndAggregateWindow(
+      {
+        detected: true,
+        luminance: avgLuminance,
+        brow_furrow: browFurrowScore,
+        eye_squint: eyeSquintScore,
+        mouth_tension: mouthTensionScore,
+        ear: earAvg,
+        head_yaw_deg: headYawDeg,
+        head_pitch_deg: headPitchDeg,
+        nose_x: nosePt.x,
+        nose_y: nosePt.y,
+        iod,
+      },
+      nowMs,
+    );
 
-    if (earAvg < 0.17 || Math.abs(headYawDeg) > 28 || Math.abs(headPitchDeg) > 22) {
+    let emotion: EmotionLabel = 'focused';
+    let confidence = spBefOut.rFace;
+
+    if (spBefOut.rFace <= 0.0) {
+      emotion = 'neutral';
+      confidence = 0;
+    } else if (earAvg < 0.17 || Math.abs(headYawDeg) > 28 || Math.abs(headPitchDeg) > 22) {
       emotion = 'bored';
-      confidence = 0.81;
+      confidence = Number((0.75 * spBefOut.rFace).toFixed(2));
     } else if (browFurrowScore >= 0.48 && mouthTensionScore >= 0.35) {
       emotion = 'frustrated';
-      confidence = Number(Math.min(0.96, 0.72 + browFurrowScore * 0.25).toFixed(2));
+      confidence = Number(Math.min(0.96, (0.72 + browFurrowScore * 0.25) * spBefOut.rFace).toFixed(2));
     } else if (
+      spBefOut.faceCalProb >= 0.55 ||
       browFurrowScore >= 0.38 ||
       (eyeSquintScore >= 0.35 && gazeStill) ||
       (eyeLocked && browFurrowScore >= 0.24)
     ) {
       emotion = 'confused';
-      confidence = Number(Math.min(0.95, 0.74 + browFurrowScore * 0.22).toFixed(2));
+      confidence = Number(Math.min(0.95, Math.max(spBefOut.faceCalProb, 0.7) * spBefOut.rFace).toFixed(2));
     } else if (smileScore >= 0.42) {
       emotion = 'happy';
-      confidence = Number(Math.min(0.95, 0.75 + smileScore * 0.2).toFixed(2));
+      confidence = Number(Math.min(0.95, (0.75 + smileScore * 0.2) * spBefOut.rFace).toFixed(2));
     } else {
       emotion = 'focused';
-      confidence = 0.88;
+      confidence = Number((0.88 * spBefOut.rFace).toFixed(2));
     }
 
-    const embedding192 = extract192dBiometricDescriptor(
-      landmarks,
-      browFurrowScore,
-      eyeSquintScore,
-      earAvg,
-    );
+    const embedding192 = extract192dBiometricDescriptor(landmarks);
     const cosineSimilarity = computeMaxCosineSimilarity(embedding192, registeredEmbeddings);
 
     return {
@@ -686,6 +602,11 @@ export class RealFaceTrackerSession {
       confidence,
       embedding192,
       cosineSimilarity,
+      rFace: spBefOut.rFace,
+      llrFace: spBefOut.llrFace,
+      faceCalProb: spBefOut.faceCalProb,
+      faceRawProb: spBefOut.faceRawProb,
+      personalBaselineReady: spBefOut.personalBaselineReady,
     };
   }
 }
@@ -710,7 +631,6 @@ export function drawRealFaceLandmarksOverlay(
   },
 ) {
   if (landmarks.length === 0) {
-    // Draw No-Face Warning HUD on Canvas
     ctx.strokeStyle = '#ef4444';
     ctx.lineWidth = 2;
     ctx.strokeRect(20, 20, width - 40, height - 40);
@@ -721,7 +641,7 @@ export function drawRealFaceLandmarksOverlay(
     ctx.fillText('KHÔNG PHÁT HIỆN KHUÔN MẶT TRÊN WEBCAM (0 FACES)', 40, height / 2 - 2);
     ctx.fillStyle = '#ffffff';
     ctx.font = '500 11px sans-serif';
-    ctx.fillText('Vắng mặt quá 30 giây sẽ tự động tạm dừng bài giảng', 40, height / 2 + 14);
+    ctx.fillText('Nhánh khuôn mặt r_face = 0.0 (Không bịa điểm mốc)', 40, height / 2 + 14);
     return;
   }
 
@@ -734,7 +654,6 @@ export function drawRealFaceLandmarksOverlay(
         ? '#0866ff'
         : '#10b981';
 
-  // 1. Draw sparse 478 mesh points at real (x, y) coordinates
   ctx.fillStyle = 'rgba(255,255,255,0.28)';
   for (let i = 0; i < landmarks.length; i += 3) {
     const pt = landmarks[i];
@@ -742,7 +661,6 @@ export function drawRealFaceLandmarksOverlay(
     ctx.fillRect(pt.x * width - 0.75, pt.y * height - 0.75, 1.5, 1.5);
   }
 
-  // 2. Draw Face Oval contour at real detected coordinates
   ctx.strokeStyle = strokeColor;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -755,7 +673,6 @@ export function drawRealFaceLandmarksOverlay(
   ctx.closePath();
   ctx.stroke();
 
-  // 3. Draw Left & Right Eyebrow vectors (AU4 Brow Furrow indicators)
   const drawPolyline = (indices: readonly number[], close = false) => {
     ctx.beginPath();
     indices.forEach((idx, i) => {
@@ -772,16 +689,13 @@ export function drawRealFaceLandmarksOverlay(
   drawPolyline(LEFT_EYEBROW_INDICES, false);
   drawPolyline(RIGHT_EYEBROW_INDICES, false);
 
-  // 4. Draw Left & Right Eye contours (EAR [33, 160, 158, 133, 153, 144] & [362, 385, 387, 263, 373, 380])
   ctx.lineWidth = 1.6;
   drawPolyline(LEFT_EYE_INDICES, true);
   drawPolyline(RIGHT_EYE_INDICES, true);
 
-  // 5. Draw Outer Lips contour
   ctx.lineWidth = 1.4;
   drawPolyline(LIPS_OUTER_INDICES, true);
 
-  // 6. Draw Nose Tip Anchor (Landmark #1)
   const nose = landmarks[1];
   if (nose) {
     ctx.fillStyle = options.eyeLocked ? '#0866ff' : '#10b981';
@@ -790,7 +704,6 @@ export function drawRealFaceLandmarksOverlay(
     ctx.fill();
   }
 
-  // 7. Top HUD telemetry bar
   ctx.fillStyle = 'rgba(17,24,39,0.82)';
   ctx.fillRect(8, 8, width - 16, 24);
   ctx.fillStyle = '#ffffff';

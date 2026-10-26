@@ -21,7 +21,6 @@ import { useLearnStore } from '@/store/useLearnStore';
 import { useAccountStore } from '@/store/useAccountStore';
 import {
   RealFaceTrackerSession,
-  buildAnchored478Landmarks,
   drawRealFaceLandmarksOverlay,
   type Point3D,
 } from './realFaceTracker';
@@ -56,7 +55,7 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
   const [consentDialogOpen, setConsentDialogOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [showTelemetryDetails, setShowTelemetryDetails] = useState(true);
-  const [cvEngineBadge, setCvEngineBadge] = useState<'MediaPipe 478 Live' | 'Pixel CV Live' | 'CV Edge Sim'>('CV Edge Sim');
+  const [cvEngineBadge, setCvEngineBadge] = useState<'MediaPipe 478 Live' | 'Chờ Camera'>('Chờ Camera');
 
   const { profile, faceEmbeddings, setCameraConsent } = useAccountStore();
   const { currentTimeSec, setIsPlaying } = useLearnStore();
@@ -69,7 +68,6 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
     earAvg,
     earVariance,
     noseDriftPx,
-    gazeStill,
     eyeLocked,
     gazeBoost,
     avgLuminance,
@@ -83,8 +81,21 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
     features12,
     slidingWindowEmotions,
     ruleScore,
-    mlProb,
     mlLevel,
+    posteriorProb,
+    priorProb,
+    llrFace,
+    llrBeh,
+    llrQuiz,
+    rFace,
+    rBeh,
+    rQuiz,
+    contribFace,
+    contribBeh,
+    contribQuiz,
+    segmentPrior,
+    apiStatus,
+    personalBaselineReady,
     cooldownRemainingSec,
     setCameraEnabled,
     setCameraStreaming,
@@ -101,7 +112,6 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
     trackerRef.current = new RealFaceTrackerSession();
   }
 
-  // Start or stop real webcam and run real-time MediaPipe 478 / Pixel CV loop on <canvas>
   useEffect(() => {
     let stream: MediaStream | null = null;
     let animId: number | null = null;
@@ -124,12 +134,17 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
             setCameraStreaming(true);
             setCameraError(null);
           }
+        } else if (isMounted) {
+          setCameraStreaming(false);
+          setCameraError(
+            'Không xác định (Mất kết nối API / Thiếu tín hiệu) — Trình duyệt không hỗ trợ hoặc từ chối quyền Camera',
+          );
         }
       } catch {
         if (isMounted) {
           setCameraStreaming(false);
           setCameraError(
-            'Không tìm thấy Webcam vật lý — Đang chạy chế độ Mô phỏng Thị giác Máy tính (MediaPipe 478 Landmarks) trên trình duyệt',
+            'Không xác định (Mất kết nối API / Thiếu tín hiệu) — Quyền truy cập Camera bị từ chối hoặc không có Webcam vật lý',
           );
         }
       }
@@ -156,11 +171,9 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
       const inSimOverride = now < simOverrideUntilRef.current;
 
       if (video && video.readyState >= 2 && video.videoWidth > 0) {
-        // 1. Draw raw frame first to read true pixel RGB luminance via ctx.getImageData
         ctx.filter = 'none';
         ctx.drawImage(video, 0, 0, w, h);
 
-        // 2. Run RealFaceTrackerSession on live video + canvas
         if (trackerRef.current && !inSimOverride) {
           const cvRes = await trackerRef.current.processFrame(
             video,
@@ -168,40 +181,46 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
             w,
             h,
             accountState.faceEmbeddings,
+            now,
           );
           latestLandmarksRef.current = cvRes.landmarks;
           setCvEngineBadge(
-            cvRes.engineMode === 'mediapipe_wasm' ? 'MediaPipe 478 Live' : 'Pixel CV Live',
+            cvRes.engineMode === 'mediapipe_wasm' ? 'MediaPipe 478 Live' : 'Chờ Camera',
           );
 
-          // Apply Low-Light Boost filter when room luminance < 95
           if (cvRes.lowLightBoostActive) {
             ctx.filter = 'brightness(1.38) contrast(1.22)';
             ctx.drawImage(video, 0, 0, w, h);
             ctx.filter = 'none';
           }
 
-          // Throttle store telemetry updates to every 900ms for smooth React rendering
           if (now - lastTelemetrySyncMsRef.current >= 900) {
             lastTelemetrySyncMsRef.current = now;
-            state.updateCvFrameMetrics({
-              videoTimestampSec: learnState.currentTimeSec,
-              emotion: cvRes.emotion,
-              confidence: cvRes.confidence,
-              earAvg: cvRes.earAvg,
-              earVariance: cvRes.earVariance,
-              noseDriftPx: cvRes.noseDriftPx,
-              gazeStill: cvRes.gazeStill,
-              eyeLocked: cvRes.eyeLocked,
-              avgLuminance: cvRes.avgLuminance,
-              browFurrowScore: cvRes.browFurrowScore,
-              eyeSquintScore: cvRes.eyeSquintScore,
-              headYawDeg: cvRes.headYawDeg,
-              headPitchDeg: cvRes.headPitchDeg,
-            });
+            state.updateCvFrameMetrics(
+              {
+                videoTimestampSec: learnState.currentTimeSec,
+                emotion: cvRes.emotion,
+                confidence: cvRes.confidence,
+                earAvg: cvRes.earAvg,
+                earVariance: cvRes.earVariance,
+                noseDriftPx: cvRes.noseDriftPx,
+                gazeStill: cvRes.gazeStill,
+                eyeLocked: cvRes.eyeLocked,
+                avgLuminance: cvRes.avgLuminance,
+                browFurrowScore: cvRes.browFurrowScore,
+                eyeSquintScore: cvRes.eyeSquintScore,
+                mouthTensionScore: cvRes.mouthTensionScore,
+                headYawDeg: cvRes.headYawDeg,
+                headPitchDeg: cvRes.headPitchDeg,
+                faceDetected: cvRes.faceDetected,
+                rFace: cvRes.rFace,
+                llrFace: cvRes.llrFace,
+                personalBaselineReady: cvRes.personalBaselineReady,
+              },
+              now,
+            );
           }
 
-          // Every 5 seconds: run real Biometric & Face Absence Guard check
           if (now - lastBiometricSyncMsRef.current >= 5000) {
             lastBiometricSyncMsRef.current = now;
             if (!cvRes.faceDetected || cvRes.landmarks.length === 0) {
@@ -222,42 +241,11 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
           ctx.filter = 'none';
         }
       } else {
-        // Synthetic dark slate studio feed when no webcam is active
         ctx.fillStyle = '#111827';
         ctx.fillRect(0, 0, w, h);
-
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-        ctx.lineWidth = 1;
-        for (let x = 0; x < w; x += 24) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, h);
-          ctx.stroke();
-        }
-        for (let y = 0; y < h; y += 24) {
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(w, y);
-          ctx.stroke();
-        }
-
-        if (state.currentEmotion === 'no_face') {
-          latestLandmarksRef.current = [];
-        } else {
-          latestLandmarksRef.current = buildAnchored478Landmarks(
-            0.5,
-            0.52,
-            0.16,
-            0.28,
-            state.headYawDeg,
-            state.headPitchDeg,
-            state.earAvg || 0.25,
-            state.browFurrowScore,
-          );
-        }
+        latestLandmarksRef.current = [];
       }
 
-      // Draw actual 478 3D Landmarks, Face Oval, Eyebrows, Eye Contours & Nose Tip at real (x, y)
       const latestState = useConfusionStore.getState();
       drawRealFaceLandmarksOverlay(ctx, w, h, latestLandmarksRef.current, {
         isOwnerVerified: latestState.isOwnerVerified,
@@ -285,7 +273,6 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
     };
   }, [cameraEnabled, faceEmbeddings, setCameraStreaming]);
 
-  // Interactive Demo Simulation Handlers (Locks simulation override for 12s so examiners can inspect)
   const handleSimulateConfusedEyeLock = async () => {
     simOverrideUntilRef.current = Date.now() + 12000;
     for (let i = 0; i < 3; i++) {
@@ -298,11 +285,15 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
         noseDriftPx: 1.9,
         gazeStill: true,
         eyeLocked: true,
-        avgLuminance: 82, // Triggers Low-Light Adaptive Preprocessor (<95)
-        browFurrowScore: 0.84, // Strong AU4 brow furrow
-        eyeSquintScore: 0.76, // Strong AU7 eye squint
+        avgLuminance: 82,
+        browFurrowScore: 0.84,
+        eyeSquintScore: 0.76,
+        mouthTensionScore: 0.42,
         headYawDeg: -0.6,
         headPitchDeg: 0.8,
+        faceDetected: true,
+        rFace: 0.78,
+        llrFace: 1.45,
       });
     }
     setIsPlaying(false);
@@ -327,8 +318,12 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
       avgLuminance: 118,
       browFurrowScore: 0.78,
       eyeSquintScore: 0.71,
+      mouthTensionScore: 0.48,
       headYawDeg: 1.2,
       headPitchDeg: -1.4,
+      faceDetected: true,
+      rFace: 0.95,
+      llrFace: 1.62,
     });
     setIsPlaying(false);
     await triggerProactiveIntervention(lessonId, currentTimeSec, 'hybrid_rule', true);
@@ -340,7 +335,7 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
     updateCvFrameMetrics({
       videoTimestampSec: currentTimeSec,
       emotion: 'no_face',
-      confidence: 0.99,
+      confidence: 0,
       earAvg: 0,
       earVariance: 0,
       noseDriftPx: 0,
@@ -349,8 +344,12 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
       avgLuminance,
       browFurrowScore: 0,
       eyeSquintScore: 0,
+      mouthTensionScore: 0,
       headYawDeg: 0,
       headPitchDeg: 0,
+      faceDetected: false,
+      rFace: 0,
+      llrFace: 0,
     });
     for (let i = 0; i < 6; i++) {
       recordBiometricCheck('no_face', 0, currentTimeSec);
@@ -366,8 +365,10 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
     setIsPlaying(false);
   };
 
+  const isIndeterminate =
+    mlLevel === 'unknown' || apiStatus === 'indeterminate' || Boolean(cameraError && !cameraStreaming && rBeh === 0 && rQuiz === 0);
   const emotionBadge = EMOTION_META[currentEmotion] || EMOTION_META.neutral;
-  const mlpPercent = Math.round(mlProb * 100);
+  const posteriorPercent = Math.round(posteriorProb * 100);
 
   return (
     <>
@@ -381,14 +382,17 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-primary">
-                  Giám sát Nhận diện Bối rối & Xác thực Khuôn mặt (478 Landmarks)
+                  Hợp nhất Bằng chứng Bayes SP-BEF & Xác thực Khuôn mặt (478 Landmarks)
                 </h3>
-                <Badge variant={cameraEnabled ? 'success' : 'default'}>
-                  {cameraEnabled ? (cameraStreaming ? cvEngineBadge : 'CV Edge Sim') : 'Đã tắt'}
+                <Badge variant={cameraEnabled && cameraStreaming ? 'success' : 'default'}>
+                  {cameraEnabled ? (cameraStreaming ? cvEngineBadge : 'Không có tín hiệu Camera') : 'Đã tắt'}
+                </Badge>
+                <Badge variant={personalBaselineReady ? 'info' : 'default'}>
+                  {personalBaselineReady ? 'Baseline C2: Đã khóa' : 'Baseline C2: Đang học 60s'}
                 </Badge>
               </div>
               <p className="text-xs text-secondary">
-                100% suy luận trực tiếp trên trình duyệt (0 byte video gửi lên máy chủ) · Kiểm tra sinh trắc 192-d mỗi 5 giây
+                100% suy luận tại biên (ONNX `sp_bef_face.onnx` + MediaPipe 0.10.14) · Khử Base-Rate LLR · Bộ lọc HMM 2 trạng thái
               </p>
             </div>
           </div>
@@ -413,7 +417,21 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
           </div>
         </div>
 
-        {/* Live Feed + Real-time Biometric & Gaze Metrics */}
+        {/* Indeterminate / Offline Banner */}
+        {(isIndeterminate || cameraError) && (
+          <div className="flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
+            <div className="flex items-center gap-2">
+              <Icon name="shield" size="sm" className="text-warning" />
+              <span className="font-semibold">
+                Không xác định (Mất kết nối API / Thiếu tín hiệu)
+              </span>
+              {cameraError && <span className="text-secondary">· {cameraError}</span>}
+            </div>
+            <Badge variant="warning">r_face = {rFace.toFixed(2)}</Badge>
+          </div>
+        )}
+
+        {/* Live Feed + Real-time SP-BEF Scores */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
           {/* Left: Video / Canvas Feed */}
           <div className="md:col-span-5">
@@ -429,7 +447,7 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
                       )}%)`}
                 </span>
                 <span className="rounded bg-white/10 px-1.5 py-0.5 text-white">
-                  Lum: {avgLuminance}/255
+                  Lum: {avgLuminance}/255 · r_face: {rFace.toFixed(2)}
                 </span>
                 {lowLightBoostActive && (
                   <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300">
@@ -438,10 +456,9 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
                 )}
               </div>
             </div>
-            {cameraError && <p className="mt-1.5 text-xs text-secondary">{cameraError}</p>}
           </div>
 
-          {/* Right: Real-time Confusion Engine Scores */}
+          {/* Right: Real-time SP-BEF Posterior & LLR Breakdown */}
           <div className="flex flex-col justify-between space-y-3 md:col-span-7">
             <div className="rounded-xl bg-muted p-3.5 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -459,7 +476,7 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
                 </div>
               </div>
 
-              {/* Dual Progress Bars: Hybrid Rule Score & Multimodal MLP Probability */}
+              {/* Dual Progress Bars: Hybrid Rule Score & SP-BEF HMM Posterior P(t) */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
@@ -474,15 +491,54 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
 
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-secondary">Multimodal MLP (12 đặc trưng)</span>
+                    <span className="font-medium text-secondary">HMM Posterior P(t) (θ_on = 62%)</span>
                     <span className="font-semibold text-primary">
-                      {mlpPercent}% ({mlLevel.toUpperCase()})
+                      {isIndeterminate
+                        ? 'Không xác định (Mất kết nối API / Thiếu tín hiệu)'
+                        : `${posteriorPercent}% (${mlLevel.toUpperCase()})`}
                     </span>
                   </div>
                   <ProgressBar
-                    value={mlpPercent}
-                    tone={mlpPercent >= 60 ? 'danger' : mlpPercent >= 40 ? 'warning' : 'chat'}
+                    value={isIndeterminate ? 0 : posteriorPercent}
+                    tone={posteriorPercent >= 62 ? 'danger' : posteriorPercent >= 42 ? 'warning' : 'chat'}
                   />
+                </div>
+              </div>
+
+              {/* SP-BEF LLR Breakdown Strip */}
+              <div className="grid grid-cols-2 gap-2 pt-1 text-xs sm:grid-cols-5">
+                <div className="rounded-lg bg-white px-2.5 py-1.5">
+                  <span className="block text-tertiary">LLR_face × r_face</span>
+                  <span className="font-semibold tabular-nums text-primary">
+                    {llrFace.toFixed(2)} × {rFace.toFixed(2)} ({contribFace >= 0 ? '+' : ''}
+                    {contribFace.toFixed(2)})
+                  </span>
+                </div>
+                <div className="rounded-lg bg-white px-2.5 py-1.5">
+                  <span className="block text-tertiary">LLR_beh × r_beh</span>
+                  <span className="font-semibold tabular-nums text-primary">
+                    {llrBeh.toFixed(2)} × {rBeh.toFixed(2)} ({contribBeh >= 0 ? '+' : ''}
+                    {contribBeh.toFixed(2)})
+                  </span>
+                </div>
+                <div className="rounded-lg bg-white px-2.5 py-1.5">
+                  <span className="block text-tertiary">LLR_quiz × r_quiz</span>
+                  <span className="font-semibold tabular-nums text-primary">
+                    {llrQuiz.toFixed(2)} × {rQuiz.toFixed(2)} ({contribQuiz >= 0 ? '+' : ''}
+                    {contribQuiz.toFixed(2)})
+                  </span>
+                </div>
+                <div className="rounded-lg bg-white px-2.5 py-1.5">
+                  <span className="block text-tertiary">Prior π_s</span>
+                  <span className="font-semibold tabular-nums text-primary">
+                    {(segmentPrior * 100).toFixed(1)}% (P⁻={(priorProb * 100).toFixed(1)}%)
+                  </span>
+                </div>
+                <div className="rounded-lg bg-white px-2.5 py-1.5">
+                  <span className="block text-tertiary">HMM Posterior P(t)</span>
+                  <span className="font-semibold tabular-nums text-primary">
+                    {isIndeterminate ? 'Unknown' : `${(posteriorProb * 100).toFixed(1)}%`}
+                  </span>
                 </div>
               </div>
 
@@ -503,27 +559,29 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
                   </span>
                 </div>
                 <div className="rounded-lg bg-white px-2.5 py-1.5">
-                  <span className="block text-tertiary">Cửa sổ trượt (3)</span>
+                  <span className="block text-tertiary">Cửa sổ trượt (10s)</span>
                   <span className="font-semibold text-primary">
-                    {slidingWindowEmotions.map((e) => e.slice(0, 4)).join(' → ')}
+                    {slidingWindowEmotions.length > 0
+                      ? slidingWindowEmotions.map((e) => e.slice(0, 4)).join(' → ')
+                      : 'Chưa có mẫu'}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Interactive Simulation Demo Toolbar for Examiners / Defense Committee */}
+            {/* Interactive Simulation Demo Toolbar */}
             <div className="rounded-xl bg-muted p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-primary flex items-center gap-1.5">
                   <Icon name="sparkles" size="xs" className="text-chat" />
-                  Bảng Điều khiển Demo Bảo vệ Khóa luận (Test trực tiếp luồng AI):
+                  Bảng Điều khiển Kiểm thử SP-BEF (Mô phỏng Tín hiệu Thực nghiệm):
                 </span>
                 <button
                   type="button"
                   onClick={() => setShowTelemetryDetails(!showTelemetryDetails)}
                   className="text-xs font-medium text-chat hover:underline"
                 >
-                  {showTelemetryDetails ? 'Ẩn 12 đặc trưng' : 'Xem 12 đặc trưng MLP'}
+                  {showTelemetryDetails ? 'Ẩn đặc trưng cửa sổ trượt' : 'Xem đặc trưng cửa sổ trượt'}
                 </button>
               </div>
 
@@ -538,7 +596,7 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
                 </Button>
                 <Button size="xs" variant="outline" onClick={handleSimulateFaceAbsence30s}>
                   <Icon name="userGroup" size="xs" />
-                  Test Vắng mặt 30s (Khóa Video)
+                  Test Vắng mặt 30s (r_face = 0)
                 </Button>
                 <Button size="xs" variant="outline" onClick={handleSimulateIdentityMismatch}>
                   <Icon name="shield" size="xs" />
@@ -554,25 +612,25 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
                   }}
                 >
                   <Icon name="arrowPath" size="xs" />
-                  Reset Cooldown ({cooldownRemainingSec > 0 ? 'Đang chờ 5p' : 'Sẵn sàng'})
+                  Reset Phiên ({cooldownRemainingSec > 0 ? 'Đang Cooldown' : 'Sẵn sàng'})
                 </Button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* 12-Feature Multimodal Vector Inspection Grid */}
+        {/* 12-Feature Sliding Window Inspection Grid */}
         {showTelemetryDetails && (
           <div className="rounded-xl bg-muted p-3.5">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-semibold text-primary">
-                Vector 12 Đặc trưng Đa phương thức (6 Hành vi Video + 4 Cảm xúc Khuôn mặt + 2 Kết quả Quiz):
+                Đặc trưng Cửa sổ Trượt Thời gian thực (5 phút Hành vi + 10 giây Khuôn mặt + Quiz):
               </span>
-              <Badge variant="chat">StandardScaler → MLP Classifier</Badge>
+              <Badge variant="chat">SP-BEF Calibrated LLR + 2-State HMM</Badge>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-6">
               <div className="rounded-lg bg-white px-2.5 py-1.5">
-                <span className="block text-tertiary">1. pause_count</span>
+                <span className="block text-tertiary">1. pause_count (5m)</span>
                 <span className="font-semibold text-primary">{features12.pause_count} lần</span>
               </div>
               <div className="rounded-lg bg-white px-2.5 py-1.5">
@@ -584,7 +642,7 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
                 <span className="font-semibold text-primary">{features12.long_pause_count} lần</span>
               </div>
               <div className="rounded-lg bg-white px-2.5 py-1.5">
-                <span className="block text-tertiary">4. rewind_count</span>
+                <span className="block text-tertiary">4. rewind_count (5m)</span>
                 <span className="font-semibold text-primary">{features12.rewind_count} lần</span>
               </div>
               <div className="rounded-lg bg-white px-2.5 py-1.5">
@@ -593,15 +651,21 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
               </div>
               <div className="rounded-lg bg-white px-2.5 py-1.5">
                 <span className="block text-tertiary">6. speed_decrease</span>
-                <span className="font-semibold text-primary">{features12.speed_decrease ? 'Có (<1x)' : 'Không'}</span>
+                <span className="font-semibold text-primary">
+                  {features12.speed_decrease ? 'Có (<1x)' : 'Không'}
+                </span>
               </div>
               <div className="rounded-lg bg-white px-2.5 py-1.5">
-                <span className="block text-tertiary">7. confused_ratio</span>
-                <span className="font-semibold text-primary">{Math.round(features12.confused_ratio * 100)}%</span>
+                <span className="block text-tertiary">7. confused_ratio (10s)</span>
+                <span className="font-semibold text-primary">
+                  {Math.round(features12.confused_ratio * 100)}%
+                </span>
               </div>
               <div className="rounded-lg bg-white px-2.5 py-1.5">
                 <span className="block text-tertiary">8. frustrated_ratio</span>
-                <span className="font-semibold text-primary">{Math.round(features12.frustrated_ratio * 100)}%</span>
+                <span className="font-semibold text-primary">
+                  {Math.round(features12.frustrated_ratio * 100)}%
+                </span>
               </div>
               <div className="rounded-lg bg-white px-2.5 py-1.5">
                 <span className="block text-tertiary">9. emo_transitions</span>
@@ -628,29 +692,28 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
       <Dialog open={consentDialogOpen} onClose={() => setConsentDialogOpen(false)} size="md">
         <DialogTitle>Cam kết Bảo mật Hình ảnh & Quyền Riêng tư Sinh viên</DialogTitle>
         <DialogDescription>
-          Hệ thống Nhận diện Bối rối tuân thủ nghiêm ngặt kiến trúc Bảo mật tại Biên (Edge Privacy-First).
+          Hệ thống Nhận diện Bối rối SP-BEF tuân thủ nghiêm ngặt kiến trúc Bảo mật tại Biên (Edge Privacy-First).
         </DialogDescription>
         <DialogBody className="space-y-3 text-sm text-secondary">
           <div className="rounded-xl bg-muted p-3.5 space-y-2">
-            <p className="font-semibold text-primary">1. Không gửi ảnh hoặc video webcam lên máy chủ</p>
+            <p className="font-semibold text-primary">1. Không gửi ảnh hoặc điểm mốc khuôn mặt lên máy chủ</p>
             <p>
-              Toàn bộ mô hình MediaPipe Face Landmarker (478 điểm mốc 3D), tính toán độ mở mắt EAR, độ đứng yên ánh nhìn
-              (Gaze Stillness) và MobileFaceNet (vector 192 chiều) đều chạy trực tiếp trên trình duyệt thông qua WebGL /
-              WASM.
+              Toàn bộ mô hình MediaPipe Face Landmarker (478 điểm mốc 3D), chuẩn hóa baseline cá nhân 60–90s đầu phiên
+              (C2), trọng số tin cậy động r_face(t) (C4) và suy luận ONNX đều chạy trực tiếp trên trình duyệt.
             </p>
           </div>
           <div className="rounded-xl bg-muted p-3.5 space-y-2">
-            <p className="font-semibold text-primary">2. Chỉ lưu trữ nhãn cảm xúc ẩn danh & vector sinh trắc 1 chiều</p>
+            <p className="font-semibold text-primary">2. Chỉ đồng bộ tỷ số hợp lý LLR_face & trọng số tin cậy r_face</p>
             <p>
-              Máy chủ chỉ nhận nhãn cảm xúc tổng hợp (`focused`, `confused`, `frustrated`) để kích hoạt Trợ lý AI giải
-              thích bài giảng và tạo biểu đồ Điểm nóng Bối rối cho giảng viên cải thiện chất lượng slide.
+              Khi mất tín hiệu khuôn mặt hoặc phòng quá tối, hệ thống tự động đặt r_face = 0.0 mà không bịa điểm mốc hay
+              xác suất giả.
             </p>
           </div>
           <div className="flex items-center justify-between rounded-xl bg-muted p-3.5">
             <div>
               <p className="font-semibold text-primary">Trạng thái đồng ý cấp quyền Camera</p>
               <p className="text-xs text-secondary">
-                Bạn có thể bật/tắt bất kỳ lúc nào (tuy nhiên các lớp yêu cầu Điểm danh AI cần bật xác thực khuôn mặt).
+                Bạn có thể bật/tắt bất kỳ lúc nào (khi tắt camera, hệ thống chỉ sử dụng nhánh hành vi xem video và quiz).
               </p>
             </div>
             <Badge variant={profile.cameraConsentGranted ? 'success' : 'warning'}>
