@@ -206,8 +206,8 @@ func TestSPBEF_MissingModalitiesAndNoFakeImputation(t *testing.T) {
 				QuizScore:        0.0, // No quiz taken -> must NOT be imputed to 50
 				QuizTime:         0.0,
 			},
-			wantRFace: 1.0,
-			wantRQuiz: 0.0,
+			wantRFace:       1.0,
+			wantRQuiz:       0.0,
 			wantContribQuiz: 0.0,
 		},
 		{
@@ -477,15 +477,15 @@ func TestSPBEF_SessionPersistenceAndReset(t *testing.T) {
 
 	// Step 1: High confusion evidence for 5s
 	res1 := predictor.Evaluate(MultimodalFeatures{
-		SessionID:  sessionID,
-		HasFace:    true,
-		RFace:      1.0,
-		LLRFace:    3.2,
+		SessionID:     sessionID,
+		HasFace:       true,
+		RFace:         1.0,
+		LLRFace:       3.2,
 		DirectLLRFace: true,
-		RBeh:       1.0,
-		LLRBeh:     3.2,
-		DirectLLRBeh: true,
-		DtSec:      5.0,
+		RBeh:          1.0,
+		LLRBeh:        3.2,
+		DirectLLRBeh:  true,
+		DtSec:         5.0,
 	}, 0.62, 35.0)
 	assert.InDelta(t, 5.0, res1.HighDurationSec, 1e-6)
 	assert.False(t, res1.IsConfused)
@@ -554,5 +554,13 @@ func TestSPBEF_InputValidationRejectsInvalidBounds(t *testing.T) {
 		ConfusedRatio: 0.4,
 		RFace:         0.9,
 	}))
-}
 
+	// Regression: the face vector length must follow the loaded model (15 in V2.1), not a stale constant (20).
+	n := GetConfusionPredictor().FaceFeatureCount()
+	require.Equal(t, 15, n)
+	require.NoError(t, ValidateMultimodalFeatures(MultimodalFeatures{FaceFeatures: make([]float64, n)}),
+		"a face vector with the model's feature count must be accepted")
+	err := ValidateMultimodalFeatures(MultimodalFeatures{FaceFeatures: make([]float64, 20)})
+	require.Error(t, err, "a 20-element face vector no longer matches the model and must be rejected")
+	assert.Equal(t, 40001, gerror.Code(err).Code())
+}

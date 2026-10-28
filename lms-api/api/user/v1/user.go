@@ -9,10 +9,10 @@ type GetProfileReq struct {
 	g.Meta `path:"/user/profile" method:"get" tags:"User & Profile" summary:"Xem hồ sơ cá nhân và hồ sơ học thuật"`
 }
 type GetProfileRes struct {
-	User           *entity.User           `json:"user"`
-	StudentProfile *entity.StudentProfile `json:"studentProfile,omitempty"`
-	Streak         *entity.UserStreak     `json:"streak,omitempty"`
-	HasFaceRegistered bool                `json:"hasFaceRegistered"`
+	User              *entity.User           `json:"user"`
+	StudentProfile    *entity.StudentProfile `json:"studentProfile,omitempty"`
+	Streak            *entity.UserStreak     `json:"streak,omitempty"`
+	HasFaceRegistered bool                   `json:"hasFaceRegistered"`
 }
 
 type UpdateProfileReq struct {

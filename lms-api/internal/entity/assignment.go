@@ -4,16 +4,16 @@ import "time"
 
 type Assignment struct {
 	BaseEntity
-	CourseID     int64      `json:"courseId" gorm:"index"`
-	ClassID      int64      `json:"classId" gorm:"index"`
-	ModuleID     int64      `json:"moduleId" gorm:"index"`
-	LessonID     int64      `json:"lessonId" gorm:"index"`
-	TeacherID    int64      `json:"teacherId" gorm:"index;not null"`
-	Title        string     `json:"title" gorm:"type:varchar(255);not null"`
-	Description  string     `json:"description" gorm:"type:text"`
-	DueDate      *time.Time `json:"dueDate"`
-	MaxScore     float64    `json:"maxScore" gorm:"default:100.0"`
-	RewardPoints int        `json:"rewardPoints" gorm:"not null;default:50"`
+	CourseID      int64          `json:"courseId" gorm:"index"`
+	ClassID       int64          `json:"classId" gorm:"index"`
+	ModuleID      int64          `json:"moduleId" gorm:"index"`
+	LessonID      int64          `json:"lessonId" gorm:"index"`
+	TeacherID     int64          `json:"teacherId" gorm:"index;not null"`
+	Title         string         `json:"title" gorm:"type:varchar(255);not null"`
+	Description   string         `json:"description" gorm:"type:text"`
+	DueDate       *time.Time     `json:"dueDate"`
+	MaxScore      float64        `json:"maxScore" gorm:"default:100.0"`
+	RewardPoints  int            `json:"rewardPoints" gorm:"not null;default:50"`
 	RubricJSON    string         `json:"rubricJson" gorm:"column:rubric_json;type:text"`
 	IsPublished   bool           `json:"isPublished" gorm:"not null;default:true"`
 	Submissions   []Submission   `json:"submissions,omitempty" gorm:"foreignKey:AssignmentID"`
@@ -66,7 +66,7 @@ type Task struct {
 	AssignmentID int64      `json:"assignmentId" gorm:"index"`
 	Title        string     `json:"title" gorm:"type:varchar(255);not null"`
 	Description  string     `json:"description" gorm:"type:text"`
-	Status       string     `json:"status" gorm:"type:varchar(32);default:'todo'"`      // todo | in_progress | done
+	Status       string     `json:"status" gorm:"type:varchar(32);default:'todo'"`     // todo | in_progress | done
 	Priority     string     `json:"priority" gorm:"type:varchar(32);default:'medium'"` // low | medium | high
 	DueDate      *time.Time `json:"dueDate"`
 	CompletedAt  *time.Time `json:"completedAt"`

@@ -2,8 +2,10 @@
 
 help:
 	@echo "LMS Confusion Detection (SP-BEF V2) & Intelligent AI Tutor — Commands:"
-	@echo "  make verify        - Run full P7 verification gate (ML pytest + Go race tests + Web vitest/tsc/lint:ds/build + Admin build)"
+	@echo "  make verify        - Run full P7 verification gate (ML pytest + Go race tests + Web vitest/tsc/lint:ds/build + Admin jest/build)"
 	@echo "  make test-ml       - Run SP-BEF V2 ML pytest suite (leakage, reproducibility, ONNX/golden parity, quality gates)"
+	@echo "                      Tests needing the gitignored ml/data skip with a reason when it is absent;"
+	@echo "                      SP_BEF_REQUIRE_DATA=1 makes them fail, SP_BEF_DATA_DIR=<dir> points at another data dir"
 	@echo "  make test-api      - Run Go backend vet and race-enabled test suite"
 	@echo "  make test-web      - Run Web unit tests (vitest), TypeScript check, and Design System linter"
 	@echo "  make infra-up      - Start PostgreSQL (pgvector), Redis, MinIO via Docker Compose"
@@ -44,7 +46,7 @@ build-admin:
 	cd lms-admin && npm run build
 
 test-ml:
-	cd ml && .venv/bin/pytest -v
+	cd ml && .venv/bin/pytest -v -rs
 
 test-api:
 	cd lms-api && go vet ./... && go test -race -v ./...
@@ -54,11 +56,11 @@ test-web:
 
 verify:
 	@echo "=== [1/4] Verifying ML Pipeline (pytest: Leakage, Reproducibility, ONNX Parity, Quality Gates) ==="
-	cd ml && .venv/bin/pytest -v
+	cd ml && .venv/bin/pytest -v -rs
 	@echo "=== [2/4] Verifying Go Backend (go vet & go test -race) ==="
 	cd lms-api && go vet ./... && go test -race -v ./... && go build -o bin/lms-api main.go
 	@echo "=== [3/4] Verifying Web Frontend (vitest, tsc, lint:ds, next build) ==="
 	cd lms-web && npm run test:unit && npx tsc --noEmit && npm run lint:ds -- --all && npm run build
-	@echo "=== [4/4] Verifying Admin Dashboard (react-scripts build) ==="
-	cd lms-admin && npm run build
+	@echo "=== [4/4] Verifying Admin Dashboard (jest + react-scripts build) ==="
+	cd lms-admin && CI=true npx react-scripts test --watchAll=false && npm run build
 	@echo "=== ALL P7 VERIFICATION GATES PASSED SUCCESSFULLY ==="

@@ -81,12 +81,12 @@ type GetSemesterComparisonReq struct {
 	CourseID int64 `json:"courseId" in:"query"`
 }
 type SemesterComparisonItem struct {
-	SemesterCode          string  `json:"semesterCode"`
-	SemesterName          string  `json:"semesterName"`
-	TotalStudents         int     `json:"totalStudents"`
-	CompletionRate        float64 `json:"completionRate"`
-	AvgFinalScore         float64 `json:"avgFinalScore"`
-	ConfusionRate         float64 `json:"confusionRate"`
+	SemesterCode           string  `json:"semesterCode"`
+	SemesterName           string  `json:"semesterName"`
+	TotalStudents          int     `json:"totalStudents"`
+	CompletionRate         float64 `json:"completionRate"`
+	AvgFinalScore          float64 `json:"avgFinalScore"`
+	ConfusionRate          float64 `json:"confusionRate"`
 	InterventionSuccessPct float64 `json:"interventionSuccessPct"`
 }
 type GetSemesterComparisonRes struct {

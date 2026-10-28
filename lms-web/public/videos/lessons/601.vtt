@@ -1,0 +1,67 @@
+WEBVTT
+
+00:00:00.600 --> 00:00:05.761
+Chào các bạn, chào mừng đến với khoá Lập trình Web với JavaScript.
+
+00:00:06.111 --> 00:00:10.983
+Trong JavaScript hiện đại, ta khai báo biến bằng let hoặc const.
+
+00:00:11.333 --> 00:00:16.210
+Let dùng cho biến có thể gán lại, const dùng cho biến không gán lại.
+
+00:00:16.560 --> 00:00:20.602
+Nên tránh từ khoá var cũ vì phạm vi của nó khó lường.
+
+00:00:20.952 --> 00:00:29.433
+Một điểm rất hay bị hiểu nhầm là const chỉ cấm gán lại tên biến, chứ không làm cho mảng hay object trở nên bất biến.
+
+00:00:29.783 --> 00:00:36.453
+Vì vậy trong đoạn code, scores được khai báo bằng const nhưng lệnh scores chấm push mười vẫn hợp lệ.
+
+00:00:36.803 --> 00:00:49.653
+Các kiểu nguyên thuỷ của JavaScript gồm number, string, boolean, undefined, null, bigint và symbol, và toán tử typeof cho biết kiểu của một giá trị.
+
+00:00:52.600 --> 00:00:54.878
+Phần này nói về phép so sánh.
+
+00:00:55.228 --> 00:01:02.647
+Toán tử hai dấu bằng so sánh sau khi tự ép kiểu, nên số không so với chuỗi rỗng lại cho kết quả true.
+
+00:01:02.997 --> 00:01:05.939
+Điều này gây ra rất nhiều lỗi khó phát hiện.
+
+00:01:06.289 --> 00:01:14.219
+Toán tử ba dấu bằng so sánh cả kiểu lẫn giá trị, nên số không so với chuỗi rỗng bằng ba dấu bằng cho false.
+
+00:01:14.569 --> 00:01:17.527
+Quy tắc đơn giản là luôn dùng ba dấu bằng.
+
+00:01:17.877 --> 00:01:20.629
+Ép kiểu ngầm cũng xảy ra với phép cộng.
+
+00:01:20.979 --> 00:01:27.141
+Khi một vế là chuỗi, dấu cộng sẽ nối chuỗi, nên chuỗi năm cộng một cho chuỗi năm một.
+
+00:01:27.491 --> 00:01:32.933
+Ngược lại, phép trừ luôn ép về số, nên chuỗi năm trừ một cho số bốn.
+
+00:01:35.600 --> 00:01:37.025
+Cuối cùng là hàm.
+
+00:01:37.375 --> 00:01:43.343
+Ta có thể khai báo hàm bằng từ khoá function, như hàm add trả về a cộng b.
+
+00:01:43.693 --> 00:01:46.976
+Cách viết thứ hai là hàm mũi tên, gọn hơn.
+
+00:01:47.326 --> 00:01:57.192
+Khi thân hàm mũi tên chỉ là một biểu thức, giá trị của biểu thức được trả về tự động mà không cần return, như hàm square trả về x nhân x.
+
+00:01:57.542 --> 00:02:06.035
+Nhưng nếu bạn đặt thân hàm trong cặp ngoặc nhọn, thì phải viết return rõ ràng, nếu không hàm sẽ trả về undefined.
+
+00:02:06.385 --> 00:02:10.895
+Vì vậy dòng console chấm log cuối cùng in ra năm và mười sáu.
+
+00:02:11.245 --> 00:02:15.756
+Bài sau chúng ta sẽ dùng hàm mũi tên rất nhiều khi xử lý mảng.

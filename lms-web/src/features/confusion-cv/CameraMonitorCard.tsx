@@ -25,6 +25,7 @@ import {
   type Point3D,
 } from './realFaceTracker';
 import type { EmotionLabel } from '@/api/types';
+import { publishGazeFrame } from '@/features/reading-gaze/gazeFeed';
 
 const EMOTION_META: Record<
   EmotionLabel,
@@ -184,6 +185,13 @@ export function CameraMonitorCard({ lessonId }: CameraMonitorCardProps) {
             now,
           );
           latestLandmarksRef.current = cvRes.landmarks;
+          publishGazeFrame({
+            t: now,
+            faceDetected: cvRes.faceDetected,
+            landmarks: cvRes.landmarks,
+            headYawDeg: cvRes.headYawDeg,
+            headPitchDeg: cvRes.headPitchDeg,
+          });
           setCvEngineBadge(
             cvRes.engineMode === 'mediapipe_wasm' ? 'MediaPipe 478 Live' : 'Chờ Camera',
           );

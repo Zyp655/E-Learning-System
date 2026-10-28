@@ -94,6 +94,9 @@ func dbConnect() (*gorm.DB, bool) {
 }
 
 func AutoMigrate(db *gorm.DB, hasVector bool) error {
+	if err := dedupeRoomPlayers(db); err != nil {
+		return err
+	}
 	models := append(entity.AllEntities(), &pgqueue.Message{}, &pgqueue.Subscription{})
 	if err := db.AutoMigrate(models...); err != nil {
 		return err
@@ -105,6 +108,15 @@ func AutoMigrate(db *gorm.DB, hasVector bool) error {
 		_ = db.Exec("ALTER TABLE video_segments ADD COLUMN IF NOT EXISTS embedding vector(1536)").Error
 	}
 	return nil
+}
+
+// dedupeRoomPlayers removes duplicate (room_id, user_id) rows created by the old non-atomic JoinQuizRoom, keeping
+// the oldest row, so AutoMigrate can add the idx_room_players_room_user unique index on an existing database.
+func dedupeRoomPlayers(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&entity.RoomPlayer{}) || db.Migrator().HasIndex(&entity.RoomPlayer{}, "idx_room_players_room_user") {
+		return nil
+	}
+	return db.Exec("DELETE FROM room_players WHERE id NOT IN (SELECT MIN(id) FROM room_players GROUP BY room_id, user_id)").Error
 }
 
 func (d *Database) Close() error {

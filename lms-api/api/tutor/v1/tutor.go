@@ -46,8 +46,8 @@ type GenerateConceptMapReq struct {
 	LessonID int64 `json:"lessonId" v:"required"`
 }
 type GenerateConceptMapRes struct {
-	LessonID int64                      `json:"lessonId"`
-	Graph    *service.ConceptMapOutput  `json:"graph"`
+	LessonID int64                     `json:"lessonId"`
+	Graph    *service.ConceptMapOutput `json:"graph"`
 }
 
 type VerifyWatchingReq struct {

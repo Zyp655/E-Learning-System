@@ -185,10 +185,10 @@ type AnalyzeCourseModuleDraft struct {
 	Lessons     []string `json:"lessons"`
 }
 type AnalyzeCourseContentRes struct {
-	Title       string                     `json:"title"`
-	Outcomes    []string                   `json:"outcomes"`
-	Modules     []AnalyzeCourseModuleDraft `json:"modules"`
-	TotalWeeks  int                        `json:"totalWeeks"`
+	Title      string                     `json:"title"`
+	Outcomes   []string                   `json:"outcomes"`
+	Modules    []AnalyzeCourseModuleDraft `json:"modules"`
+	TotalWeeks int                        `json:"totalWeeks"`
 }
 
 type ListTeacherCoursesReq struct {
@@ -199,16 +199,16 @@ type ListTeacherCoursesRes struct {
 }
 
 type CreateCourseReq struct {
-	g.Meta        `path:"/teacher/courses" method:"post" tags:"Courses & Player" summary:"Giảng viên tạo khóa học mới"`
-	Title         string `json:"title" v:"required"`
-	Description   string `json:"description"`
-	ShortDesc     string `json:"shortDesc"`
-	Category      string `json:"category" d:"Khoa học máy tính"`
-	Level         string `json:"level" d:"intermediate"`
-	ThumbnailURL  string `json:"thumbnailUrl"`
-	PreviewVideo  string `json:"previewVideo"`
-	TagsJSON      string `json:"tagsJson" d:"[]"`
-	IsPublished   bool   `json:"isPublished" d:"true"`
+	g.Meta       `path:"/teacher/courses" method:"post" tags:"Courses & Player" summary:"Giảng viên tạo khóa học mới"`
+	Title        string `json:"title" v:"required"`
+	Description  string `json:"description"`
+	ShortDesc    string `json:"shortDesc"`
+	Category     string `json:"category" d:"Khoa học máy tính"`
+	Level        string `json:"level" d:"intermediate"`
+	ThumbnailURL string `json:"thumbnailUrl"`
+	PreviewVideo string `json:"previewVideo"`
+	TagsJSON     string `json:"tagsJson" d:"[]"`
+	IsPublished  bool   `json:"isPublished" d:"true"`
 }
 type CreateCourseRes struct {
 	Course *entity.Course `json:"course"`
@@ -381,4 +381,3 @@ type CompleteReadingLessonReq struct {
 type CompleteReadingLessonRes struct {
 	*service.CompleteReadingResult
 }
-

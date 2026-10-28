@@ -1,0 +1,1516 @@
+{
+  "description": "SP-BEF edge-case vectors shared by Python, Go and TypeScript. Regenerate with ml/export_sp_bef_edge_cases.py.",
+  "step_arg_order": [
+    "prev_posterior",
+    "segment_prior",
+    "llr_face",
+    "r_face",
+    "llr_beh",
+    "r_beh",
+    "llr_quiz",
+    "r_quiz",
+    "prev_high_sec",
+    "prev_intervening",
+    "cooldown_remaining_sec",
+    "dt_sec",
+    "llr_gaze",
+    "r_gaze"
+  ],
+  "interp": [
+    {
+      "x": "NaN",
+      "xp": [
+        0.0,
+        0.5,
+        1.0
+      ],
+      "fp": [
+        0.1,
+        0.4,
+        0.9
+      ],
+      "expected": 0.1
+    },
+    {
+      "x": -1.0,
+      "xp": [
+        0.0,
+        0.5,
+        1.0
+      ],
+      "fp": [
+        0.1,
+        0.4,
+        0.9
+      ],
+      "expected": 0.1
+    },
+    {
+      "x": 2.0,
+      "xp": [
+        0.0,
+        0.5,
+        1.0
+      ],
+      "fp": [
+        0.1,
+        0.4,
+        0.9
+      ],
+      "expected": 0.9
+    },
+    {
+      "x": 0.25,
+      "xp": [
+        0.0,
+        0.5,
+        1.0
+      ],
+      "fp": [
+        0.1,
+        0.4,
+        0.9
+      ],
+      "expected": 0.25
+    },
+    {
+      "x": "Infinity",
+      "xp": [
+        0.0,
+        0.5,
+        1.0
+      ],
+      "fp": [
+        0.1,
+        0.4,
+        0.9
+      ],
+      "expected": 0.9
+    },
+    {
+      "x": "-Infinity",
+      "xp": [
+        0.0,
+        0.5,
+        1.0
+      ],
+      "fp": [
+        0.1,
+        0.4,
+        0.9
+      ],
+      "expected": 0.1
+    },
+    {
+      "x": 0.5,
+      "xp": [
+        0.0,
+        0.5,
+        0.5,
+        1.0
+      ],
+      "fp": [
+        0.1,
+        0.3,
+        0.6,
+        0.9
+      ],
+      "expected": 0.3
+    },
+    {
+      "x": "NaN",
+      "xp": [],
+      "fp": [],
+      "expected": 0.0
+    },
+    {
+      "x": 0.7,
+      "xp": [],
+      "fp": [],
+      "expected": 0.7
+    }
+  ],
+  "frame_reliability": [
+    {
+      "args": [
+        1.0,
+        120.0,
+        5.0,
+        4.0,
+        1.0
+      ],
+      "expected": 1.0
+    },
+    {
+      "args": [
+        "NaN",
+        120.0,
+        5.0,
+        4.0,
+        1.0
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        1.0,
+        "NaN",
+        5.0,
+        4.0,
+        1.0
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        1.0,
+        120.0,
+        "NaN",
+        4.0,
+        1.0
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        1.0,
+        120.0,
+        "Infinity",
+        4.0,
+        1.0
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        1.0,
+        120.0,
+        5.0,
+        "NaN",
+        1.0
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        1.0,
+        120.0,
+        5.0,
+        4.0,
+        "NaN"
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        0.8,
+        60.0,
+        -30.0,
+        -20.0,
+        0.9
+      ],
+      "expected": 0.102
+    },
+    {
+      "args": [
+        1.5,
+        200.0,
+        0.0,
+        0.0,
+        2.0
+      ],
+      "expected": 1.0
+    }
+  ],
+  "gaze_reliability": [
+    {
+      "args": [
+        0.4,
+        1.0,
+        1.0,
+        0.0
+      ],
+      "expected": 1.0
+    },
+    {
+      "args": [
+        "NaN",
+        1.0,
+        1.0,
+        0.0
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        0.4,
+        "NaN",
+        1.0,
+        0.0
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        0.4,
+        1.0,
+        "NaN",
+        0.0
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        0.4,
+        1.0,
+        1.0,
+        "NaN"
+      ],
+      "expected": 0.0
+    },
+    {
+      "args": [
+        1.2,
+        0.7,
+        0.3,
+        25.0
+      ],
+      "expected": 0.07
+    }
+  ],
+  "branch": {
+    "cfg": {
+      "feature_names": [
+        "a",
+        "b",
+        "c"
+      ],
+      "scaler_mean": [
+        1.0,
+        0.5,
+        2.0
+      ],
+      "scaler_scale": [
+        0.5,
+        0.0,
+        2.0
+      ],
+      "coefficients": [
+        0.8,
+        -0.4,
+        0.3
+      ],
+      "intercept": -0.7,
+      "base_rate": 0.2,
+      "isotonic_xp": [
+        0.0,
+        0.3,
+        0.6,
+        1.0
+      ],
+      "isotonic_fp": [
+        0.05,
+        0.25,
+        0.55,
+        0.9
+      ]
+    },
+    "cases": [
+      {
+        "features": [
+          1.0,
+          0.5,
+          2.0
+        ],
+        "expected": [
+          0.331812,
+          0.281812,
+          0.450804
+        ]
+      },
+      {
+        "features": [
+          "NaN",
+          0.5,
+          2.0
+        ],
+        "expected": [
+          0.091123,
+          0.110749,
+          -0.696822
+        ]
+      },
+      {
+        "features": [
+          1.0,
+          "Infinity",
+          "-Infinity"
+        ],
+        "expected": [
+          0.310026,
+          0.260026,
+          0.340458
+        ]
+      },
+      {
+        "features": [
+          3.0,
+          2.0,
+          6.0
+        ],
+        "expected": [
+          0.924142,
+          0.833624,
+          2.997827
+        ]
+      },
+      {
+        "features": [
+          3.0,
+          2.0
+        ],
+        "expected": [
+          0.869892,
+          0.786155,
+          2.688197
+        ]
+      }
+    ]
+  },
+  "step": [
+    {
+      "case_id": "negative_weights_use_defaults",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": -1.0,
+        "w_beh": 0.0,
+        "w_quiz": -0.5,
+        "w_gaze": -2.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 2.0,
+        "r_gaze": 1.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.739268,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 2.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 1.0,
+        "contrib_face": 0.78,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.72,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 10.0,
+        "is_confused": true,
+        "should_intervene": true,
+        "cooldown_remaining_sec": 180.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "zero_weight_disables_branch",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.0,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.584717,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.0,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 10.0,
+        "is_confused": true,
+        "should_intervene": true,
+        "cooldown_remaining_sec": 180.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "zero_and_negative_thetas_use_defaults",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.0,
+        "theta_off": -0.3,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.765337,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 10.0,
+        "is_confused": true,
+        "should_intervene": true,
+        "cooldown_remaining_sec": 180.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "nonpositive_hmm_and_timing_params_use_defaults",
+      "fusion": {
+        "hmm_keep_confused": 0.0,
+        "hmm_beta0": -0.1,
+        "hmm_beta1": 0.0,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 0.0,
+        "cooldown_sec": -5.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 10.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.4775,
+        "posterior_prob": 0.824905,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 15.0,
+        "is_confused": true,
+        "should_intervene": true,
+        "cooldown_remaining_sec": 180.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "nan_dt",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 30.0,
+        "dt_sec": "NaN",
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.765337,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 30.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "negative_dt",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 30.0,
+        "dt_sec": -5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.765337,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 30.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "infinite_dt",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 30.0,
+        "dt_sec": "Infinity",
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.765337,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 30.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "nan_prev_high_sec",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": "NaN",
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.765337,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "negative_prev_high_sec",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": -20.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.765337,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "infinite_prev_high_sec",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": "Infinity",
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.765337,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "nan_and_negative_cooldown",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 10.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": "NaN",
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.765337,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 15.0,
+        "is_confused": true,
+        "should_intervene": true,
+        "cooldown_remaining_sec": 180.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "negative_cooldown",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 10.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": -40.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.765337,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 15.0,
+        "is_confused": true,
+        "should_intervene": true,
+        "cooldown_remaining_sec": 180.0,
+        "level": "high"
+      }
+    },
+    {
+      "case_id": "nan_priors_clamped",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": "NaN",
+        "segment_prior": "NaN",
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.05451,
+        "posterior_prob": 0.229114,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.02,
+        "high_duration_sec": 0.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "mild"
+      }
+    },
+    {
+      "case_id": "infinite_priors_clamped",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": "Infinity",
+        "segment_prior": "-Infinity",
+        "llr_face": 1.2,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 1.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.05451,
+        "posterior_prob": 0.229114,
+        "llr_face": 1.2,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.8,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.84,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.8,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.02,
+        "high_duration_sec": 0.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "mild"
+      }
+    },
+    {
+      "case_id": "nan_llr_with_reliability",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": "NaN",
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": "Infinity",
+        "r_quiz": 1.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.3875,
+        "llr_face": 0.0,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.0,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 1.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.0,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.0,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "moderate"
+      }
+    },
+    {
+      "case_id": "nan_reliability",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": "NaN",
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": "NaN",
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.3875,
+        "llr_face": 0.0,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.0,
+        "llr_gaze": 0.0,
+        "r_face": 0.0,
+        "r_beh": 0.0,
+        "r_quiz": 0.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.0,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.0,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "unknown"
+      }
+    },
+    {
+      "case_id": "mild_level_with_shipped_thresholds",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.2,
+        "segment_prior": 0.2,
+        "llr_face": 0.0,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 0.0,
+        "prev_high_sec": 0.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.224,
+        "posterior_prob": 0.224,
+        "llr_face": 0.0,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.0,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 0.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.0,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.0,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.2,
+        "high_duration_sec": 0.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "mild"
+      }
+    },
+    {
+      "case_id": "none_level_below_mild_floor",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.1,
+        "segment_prior": 0.1,
+        "llr_face": -1.0,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 0.0,
+        "prev_high_sec": 0.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.1365,
+        "posterior_prob": 0.072785,
+        "llr_face": -1.0,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.0,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 0.0,
+        "r_gaze": 0.0,
+        "contrib_face": -0.7,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.0,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.1,
+        "high_duration_sec": 0.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "none"
+      }
+    },
+    {
+      "case_id": "moderate_level_in_hysteresis_band",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.3,
+        "segment_prior": 0.3,
+        "llr_face": 0.0,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 0.0,
+        "prev_high_sec": 0.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3025,
+        "posterior_prob": 0.3025,
+        "llr_face": 0.0,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.0,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 0.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.0,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.0,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 0.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "moderate"
+      }
+    },
+    {
+      "case_id": "unknown_level_without_reliability",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.5,
+        "segment_prior": 0.3,
+        "llr_face": 1.2,
+        "r_face": 0.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 0.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": false,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3875,
+        "posterior_prob": 0.3875,
+        "llr_face": 0.0,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.0,
+        "llr_gaze": 0.0,
+        "r_face": 0.0,
+        "r_beh": 0.0,
+        "r_quiz": 0.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.0,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.0,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": false,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "unknown"
+      }
+    },
+    {
+      "case_id": "intervening_holds_above_theta_off",
+      "fusion": {
+        "hmm_keep_confused": 0.6,
+        "hmm_beta0": 0.04,
+        "hmm_beta1": 0.45,
+        "w_face": 0.7,
+        "w_beh": 0.0,
+        "w_quiz": 1.0,
+        "w_gaze": 0.0,
+        "theta_on": 0.4,
+        "theta_off": 0.25,
+        "min_hold_sec": 10.0,
+        "cooldown_sec": 180.0
+      },
+      "args": {
+        "prev_posterior": 0.3,
+        "segment_prior": 0.3,
+        "llr_face": 0.0,
+        "r_face": 1.0,
+        "llr_beh": 0.0,
+        "r_beh": 0.0,
+        "llr_quiz": 0.8,
+        "r_quiz": 0.0,
+        "prev_high_sec": 5.0,
+        "prev_intervening": true,
+        "cooldown_remaining_sec": 0.0,
+        "dt_sec": 5.0,
+        "llr_gaze": 0.0,
+        "r_gaze": 0.0
+      },
+      "expected": {
+        "prior_prob": 0.3025,
+        "posterior_prob": 0.3025,
+        "llr_face": 0.0,
+        "llr_beh": 0.0,
+        "llr_quiz": 0.0,
+        "llr_gaze": 0.0,
+        "r_face": 1.0,
+        "r_beh": 0.0,
+        "r_quiz": 0.0,
+        "r_gaze": 0.0,
+        "contrib_face": 0.0,
+        "contrib_beh": 0.0,
+        "contrib_quiz": 0.0,
+        "contrib_gaze": 0.0,
+        "segment_prior": 0.3,
+        "high_duration_sec": 5.0,
+        "is_confused": true,
+        "should_intervene": false,
+        "cooldown_remaining_sec": 0.0,
+        "level": "moderate"
+      }
+    }
+  ]
+}

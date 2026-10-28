@@ -50,6 +50,12 @@ export interface ReadingLessonContent {
     body: string;
     formula?: string;
     codeSnippet?: string;
+    /**
+     * Designed reading stimulus (gaze calibration lesson only), as in Zhuang et al. 2025: a coherent control
+     * paragraph, a factual-confusion paragraph (shuffled phrases / false facts) or a contextual-confusion one
+     * (dense domain jargon). The gaze sample of the paragraph is labelled from this, not from the reader.
+     */
+    stimulus?: 'control' | 'factual' | 'contextual';
   }[];
   keyTakeaways: string[];
 }
@@ -66,6 +72,8 @@ export interface LessonItem {
   orderIndex: number;
   transcriptStatus: 'none' | 'processing' | 'ready' | 'failed';
   videoUrl: string;
+  /** WebVTT captions of the lecture video. */
+  captionsUrl?: string;
   summary: string;
   attachments: { id: number; name: string; type: string; size: string }[];
   segments: VideoSegment[];
@@ -167,6 +175,8 @@ export interface CodingTestCaseResult {
   passed: boolean;
 }
 
+export type CodingLanguage = 'python' | 'typescript' | 'go';
+
 export interface CodingChallengeItem {
   id: number;
   courseId: number;
@@ -176,10 +186,11 @@ export interface CodingChallengeItem {
   problemStatement: string;
   constraints: string[];
   keyFormula: string;
+  /** Python is always present; challenges graded by lms-api only ship the backend problem's language. */
   starterCode: {
     python: string;
-    typescript: string;
-    go: string;
+    typescript?: string;
+    go?: string;
   };
   testCases: CodingTestCase[];
   aiHint: string;

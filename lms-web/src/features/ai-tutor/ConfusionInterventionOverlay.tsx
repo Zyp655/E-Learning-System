@@ -5,6 +5,7 @@ import { Icon } from '@/app/[locale]/(HOME_CATEGORY)/_components/primitives';
 import {
   Badge,
   Button,
+  LoadError,
   chipVariants,
 } from '@/app/[locale]/(HOME_CATEGORY)/_components/ui';
 import {
@@ -38,6 +39,7 @@ export function ConfusionInterventionOverlay({
     activeIntervention,
     interventionOpen,
     interventionLoading,
+    interventionError,
     ruleScore,
     mlProb,
     eyeLocked,
@@ -97,7 +99,9 @@ export function ConfusionInterventionOverlay({
       </DialogDescription>
 
       <DialogBody className="space-y-4">
-        {interventionLoading || !activeIntervention ? (
+        {interventionError && !interventionLoading ? (
+          <LoadError message={`Trợ lý AI chưa thể giải thích đoạn này: ${interventionError}`} />
+        ) : interventionLoading || !activeIntervention ? (
           <div className="rounded-xl bg-muted p-6 text-center text-sm text-secondary">
             Đang tổng hợp lời giải thích theo Hồ sơ Học vụ Sinh viên và ngữ cảnh phân đoạn...
           </div>

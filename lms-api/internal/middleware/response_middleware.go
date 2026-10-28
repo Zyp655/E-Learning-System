@@ -26,6 +26,45 @@ var (
 	streamContentType = []string{contentTypeEventStream, contentTypeOctetStream, contentTypeMixedReplace}
 )
 
+// httpStatusForCode maps a response code to the HTTP status sent with the JSON envelope.
+// Project codes carry the status in their leading digits (40001 -> 400, 404001 -> 404); GoFrame's
+// built-in 2-digit gcode values (50 InternalError, 61 NotAuthorized, 65 NotFound, ...) must not fall
+// through to 200, otherwise clients treat failures as successful responses.
+func httpStatusForCode(code int) int {
+	switch code {
+	case gcode.CodeOK.Code():
+		return http.StatusOK
+	case gcode.CodeValidationFailed.Code(), gcode.CodeInvalidParameter.Code(), gcode.CodeMissingParameter.Code(),
+		gcode.CodeInvalidOperation.Code(), gcode.CodeOperationFailed.Code(), gcode.CodeInvalidRequest.Code(),
+		gcode.CodeBusinessValidationFailed.Code():
+		return http.StatusBadRequest
+	case gcode.CodeNotAuthorized.Code(), gcode.CodeSecurityReason.Code():
+		return http.StatusForbidden
+	case gcode.CodeNotFound.Code():
+		return http.StatusNotFound
+	case gcode.CodeNotImplemented.Code(), gcode.CodeNotSupported.Code():
+		return http.StatusNotImplemented
+	case gcode.CodeServerBusy.Code():
+		return http.StatusServiceUnavailable
+	}
+
+	var status int
+	switch len(strconv.Itoa(code)) {
+	case 3:
+		status = code
+	case 5:
+		status = code / 100
+	case 6:
+		status = code / 1000
+	}
+	if status >= 100 && status <= 599 {
+		return status
+	}
+	// Remaining framework codes (50 InternalError, 52 DbOperationError, 64 Unknown, 68 InternalPanic, ...)
+	// and any unrecognised code are server-side failures.
+	return http.StatusInternalServerError
+}
+
 func (m *middlewareStr) ResponseMiddleware() func(r *ghttp.Request) {
 	return func(r *ghttp.Request) {
 		r.Middleware.Next()
@@ -72,20 +111,7 @@ func (m *middlewareStr) ResponseMiddleware() func(r *ghttp.Request) {
 			msg = code.Message()
 		}
 
-		httpStatus := http.StatusOK
-		length := len(strconv.Itoa(code.Code()))
-		if length == 3 {
-			httpStatus = code.Code()
-		} else if length == 5 {
-			httpStatus = code.Code() / 100
-		} else if length == 6 {
-			httpStatus = code.Code() / 1000
-		}
-		if code.Code() == 51 || code.Code() == 52 || code.Code() == 53 || code.Code() == 60 {
-			httpStatus = http.StatusBadRequest
-		}
-
-		r.Response.WriteHeader(httpStatus)
+		r.Response.WriteHeader(httpStatusForCode(code.Code()))
 		r.Response.WriteJson(DefaultHandlerResponse{
 			Code:    code.Code(),
 			Message: msg,

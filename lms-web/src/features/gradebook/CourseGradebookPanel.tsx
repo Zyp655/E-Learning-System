@@ -8,9 +8,11 @@ import {
   Button,
   ButtonLink,
   Card,
+  FieldError,
+  LoadError,
   ProgressBar,
 } from '@/app/[locale]/(HOME_CATEGORY)/_components/ui';
-import { lmsApi } from '@/api';
+import { describeApiError, lmsApi } from '@/api';
 import { MOCK_COURSE_GRADEBOOKS } from '@/api/mockData';
 import type { CourseGradebook, GradebookItem } from '@/api/types';
 
@@ -39,30 +41,51 @@ export function CourseGradebookPanel({
   );
   const [resettingDeadlines, setResettingDeadlines] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setGradebook(MOCK_COURSE_GRADEBOOKS[courseId] || MOCK_COURSE_GRADEBOOKS[1]);
-    lmsApi.getCourseGradebook(courseId).then((res) => {
-      if (res && res.items) setGradebook(res);
-    });
+    setLoadError(null);
+    lmsApi
+      .getCourseGradebook(courseId)
+      .then((res) => {
+        if (!cancelled && res && res.items) setGradebook(res);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setLoadError(`Không tải được bảng điểm từ máy chủ, đang hiển thị dữ liệu mẫu: ${describeApiError(err)}`);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [courseId]);
 
   const handleResetMyDeadlines = async () => {
     setResettingDeadlines(true);
-    const res = await lmsApi.resetCourseDeadlines(courseId);
-    const shiftedItems: GradebookItem[] = gradebook.items.map((item) => ({
-      ...item,
-      dueDate: res.newDeadlineDate,
-      status: item.status === 'overdue' ? 'in_progress' : item.status,
-    }));
-    setGradebook({
-      ...gradebook,
-      items: shiftedItems,
-    });
-    setToastMessage(res.message);
-    setResettingDeadlines(false);
-    if (onDeadlineReset) {
-      onDeadlineReset(res.newDeadlineDate);
+    setResetError(null);
+    try {
+      const res = await lmsApi.resetCourseDeadlines(courseId);
+      const newDueDate = res.newDeadlineDate;
+      const shiftedItems: GradebookItem[] = gradebook.items.map((item) => ({
+        ...item,
+        dueDate: newDueDate || item.dueDate,
+        status: item.status === 'overdue' ? 'in_progress' : item.status,
+      }));
+      setGradebook({
+        ...gradebook,
+        items: shiftedItems,
+      });
+      setToastMessage(res.message);
+      if (onDeadlineReset && newDueDate) {
+        onDeadlineReset(newDueDate);
+      }
+    } catch (err) {
+      setResetError(`Không dời được hạn nộp: ${describeApiError(err)}`);
+    } finally {
+      setResettingDeadlines(false);
     }
   };
 
@@ -73,6 +96,8 @@ export function CourseGradebookPanel({
 
   return (
     <div className="space-y-4">
+      {loadError && <LoadError message={loadError} />}
+      <FieldError>{resetError}</FieldError>
       {/* Toast Notification after 1-Click Reset Deadlines */}
       {toastMessage && (
         <div className="flex items-center justify-between gap-3 rounded-xl bg-green-50 px-4 py-3 text-xs text-green-900">

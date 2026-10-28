@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"errors"
 	"log"
 	"time"
 
@@ -9,16 +10,21 @@ import (
 	"gorm.io/gorm"
 )
 
-func (d *Database) Seed() error {
+func (d *Database) Seed(password string) error {
 	if d == nil || d.Connection == nil {
 		return nil
 	}
-	return SeedDatabase(d.Connection)
+	return SeedDatabase(d.Connection, password)
 }
 
-func SeedDatabase(db *gorm.DB) error {
+// SeedDatabase inserts the demo dataset into an empty database. Every seeded account uses password; callers
+// obtain it from config.DemoSeedPlan, which refuses weak passwords outside local development.
+func SeedDatabase(db *gorm.DB, password string) error {
 	if db == nil {
 		return nil
+	}
+	if password == "" {
+		return errors.New("SeedDatabase: empty demo password")
 	}
 
 	var userCount int64
@@ -100,7 +106,10 @@ func SeedDatabase(db *gorm.DB) error {
 	db.Create(&semPrev)
 
 	// 3. Users (Admin ID=1, Teacher ID=2, Student ID=3 + extra students)
-	pwdHash, _ := helper.HashPassword("123456")
+	pwdHash, err := helper.HashPassword(password)
+	if err != nil {
+		return err
+	}
 
 	admin := entity.User{
 		Email:         "admin@lms.edu.vn",

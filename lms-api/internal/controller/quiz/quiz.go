@@ -3,10 +3,13 @@ package quiz
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/hieu/lms-confusion/lms-api/api/quiz"
 	v1 "github.com/hieu/lms-confusion/lms-api/api/quiz/v1"
@@ -229,4 +232,73 @@ func (c *ControllerV1) CreateQuizRoom(ctx context.Context, req *v1.CreateQuizRoo
 	})
 	c.svc.DB().WithContext(ctx).Preload("Players.User").First(&room, room.ID)
 	return &v1.CreateQuizRoomRes{Room: &room}, nil
+}
+
+// JoinQuizRoom registers the caller as a RoomPlayer. The quiz room WebSocket only admits the host and players.
+func (c *ControllerV1) JoinQuizRoom(ctx context.Context, req *v1.JoinQuizRoomReq) (res *v1.JoinQuizRoomRes, err error) {
+	userID := consts.CurrentUserID(ctx)
+	if userID == 0 {
+		return nil, resCode.TokenMissing.New("Vui lòng đăng nhập")
+	}
+	db := c.svc.DB().WithContext(ctx)
+	var room entity.QuizRoom
+	if err := db.Where("room_code = ?", strings.ToUpper(strings.TrimSpace(req.RoomCode))).First(&room).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, resCode.NotFound.New("Không tìm thấy phòng thi đấu")
+		}
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
+	isMember := func(tx *gorm.DB) (bool, error) {
+		var n int64
+		err := tx.Model(&entity.RoomPlayer{}).Where("room_id = ? AND user_id = ?", room.ID, userID).Count(&n).Error
+		return n > 0, err
+	}
+	member, err := isMember(db)
+	if err != nil {
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
+	if !member {
+		errFull := resCode.PermissionDenied.New("Phòng thi đấu đã đủ người chơi")
+		errStarted := resCode.PermissionDenied.New("Phòng thi đấu đã bắt đầu hoặc đã kết thúc")
+		txErr := db.Transaction(func(tx *gorm.DB) error {
+			// Touching the room row first takes its row lock (PostgreSQL) or the write lock (SQLite), so concurrent
+			// joins of the same room run one after another: the capacity check and the insert below are atomic.
+			lock := tx.Model(&entity.QuizRoom{}).Where("id = ? AND status = ?", room.ID, "waiting").Update("updated_at", time.Now())
+			if lock.Error != nil {
+				return resCode.DatabaseFailed.WithError(lock.Error)
+			}
+			if lock.RowsAffected == 0 {
+				return errStarted
+			}
+			already, err := isMember(tx)
+			if err != nil {
+				return resCode.DatabaseFailed.WithError(err)
+			}
+			if already {
+				return nil // a concurrent request from the same user joined first
+			}
+			var players int64
+			if err := tx.Model(&entity.RoomPlayer{}).Where("room_id = ?", room.ID).Count(&players).Error; err != nil {
+				return resCode.DatabaseFailed.WithError(err)
+			}
+			if room.MaxPlayers > 0 && players >= int64(room.MaxPlayers) {
+				return errFull
+			}
+			// The (room_id, user_id) unique index is the final guard against duplicate rows.
+			if err := tx.Create(&entity.RoomPlayer{RoomID: room.ID, UserID: userID, Rank: int(players) + 1}).Error; err != nil {
+				return resCode.DatabaseFailed.WithError(err)
+			}
+			return nil
+		})
+		if txErr != nil {
+			// Lost a duplicate-insert race against the same user: joining is idempotent.
+			if again, err := isMember(db); err != nil || !again {
+				return nil, txErr
+			}
+		}
+	}
+	if err := db.Preload("Players.User").First(&room, room.ID).Error; err != nil {
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
+	return &v1.JoinQuizRoomRes{Room: &room}, nil
 }

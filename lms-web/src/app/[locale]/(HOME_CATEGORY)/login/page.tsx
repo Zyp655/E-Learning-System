@@ -9,23 +9,42 @@ import {
   Badge,
   Button,
   Card,
+  FieldError,
   FieldLabel,
   Input,
   segmented,
 } from '../_components/ui';
 import { useAccountStore } from '@/store/useAccountStore';
+import { accountModeForRole, authApi } from '@/api/auth';
+import { describeApiError } from '@/api/client';
+
+const IS_DEV = process.env.NODE_ENV !== 'production';
 
 export default function LoginPage() {
   const router = useRouter();
   const { setMode } = useAccountStore();
   const [roleTab, setRoleTab] = useState<'student' | 'teacher'>('student');
-  const [email, setEmail] = useState('hieu.nm2021604123@sis.hust.edu.vn');
-  const [password, setPassword] = useState('••••••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMode(roleTab);
-    router.push(withLocale(roleTab === 'teacher' ? '/teacher/dashboard' : '/student/dashboard', 'vi'));
+    if (submitting) return;
+    setSubmitting(true);
+    setLoginError(null);
+    try {
+      const bundle = await authApi.login(email, password);
+      // The workspace follows the account role returned by lms-api, not the selected tab.
+      const mode = accountModeForRole(bundle.user.role);
+      setMode(mode);
+      router.push(withLocale(mode === 'teacher' ? '/teacher/dashboard' : '/student/dashboard', 'vi'));
+    } catch (err) {
+      setLoginError(describeApiError(err));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -48,10 +67,7 @@ export default function LoginPage() {
                 type="button"
                 role="tab"
                 aria-selected={roleTab === 'student'}
-                onClick={() => {
-                  setRoleTab('student');
-                  setEmail('hieu.nm2021604123@sis.hust.edu.vn');
-                }}
+                onClick={() => setRoleTab('student')}
                 className={segmented.tab}
               >
                 Học viên (Student)
@@ -60,10 +76,7 @@ export default function LoginPage() {
                 type="button"
                 role="tab"
                 aria-selected={roleTab === 'teacher'}
-                onClick={() => {
-                  setRoleTab('teacher');
-                  setEmail('minh.tq@cs.university.edu.vn');
-                }}
+                onClick={() => setRoleTab('teacher')}
                 className={segmented.tab}
               >
                 Giảng viên (Teacher)
@@ -79,6 +92,7 @@ export default function LoginPage() {
               <Input
                 id="login-email"
                 type="email"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -92,28 +106,38 @@ export default function LoginPage() {
               <Input
                 id="login-password"
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
             </div>
 
+            <FieldError id="login-error">{loginError}</FieldError>
+
             <Button
               type="submit"
               variant={roleTab === 'teacher' ? 'seller' : 'primary'}
               size="md"
               block
+              disabled={submitting}
             >
               <Icon name="checkCircle" size="sm" />
-              {roleTab === 'teacher' ? 'Đăng nhập Teacher Studio' : 'Đăng nhập Khu Học viên'}
+              {submitting
+                ? 'Đang đăng nhập...'
+                : roleTab === 'teacher'
+                  ? 'Đăng nhập Teacher Studio'
+                  : 'Đăng nhập Khu Học viên'}
             </Button>
           </form>
 
-          <div className="rounded-xl bg-muted p-3.5 text-xs text-secondary space-y-1">
-            <p className="font-semibold text-primary">Tài khoản Demo đã cấu hình sẵn:</p>
-            <p>• Học viên: Nguyễn Minh Hiếu (MSSV 2021604123 · KHMT & AI)</p>
-            <p>• Giảng viên: PGS.TS. Trần Quang Minh (Khoa KHMT)</p>
-          </div>
+          {IS_DEV && (
+            <div className="rounded-xl bg-muted p-3.5 text-xs text-secondary space-y-1">
+              <p className="font-semibold text-primary">Tài khoản seed (chỉ môi trường phát triển):</p>
+              <p>• Học viên: student@lms.edu.vn / 123456</p>
+              <p>• Giảng viên: teacher@lms.edu.vn / 123456</p>
+            </div>
+          )}
 
           <p className="text-center text-xs text-secondary">
             Chưa có tài khoản?{' '}

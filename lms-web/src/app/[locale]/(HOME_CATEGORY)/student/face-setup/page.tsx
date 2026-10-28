@@ -8,12 +8,13 @@ import {
   Button,
   ButtonLink,
   Card,
+  LoadError,
   PageHeader,
   ProgressBar,
   chipVariants,
 } from '../../_components/ui';
 import { useAccountStore } from '@/store/useAccountStore';
-import { lmsApi } from '@/api';
+import { describeApiError, lmsApi } from '@/api';
 import {
   RealFaceTrackerSession,
   drawRealFaceLandmarksOverlay,
@@ -62,7 +63,7 @@ const ANGLE_STEPS: AngleStepConfig[] = [
 ];
 
 export default function StudentFaceSetupPage() {
-  const { profile, faceEmbeddings, setFacePoseEmbedding, completeFaceRegistration } = useAccountStore();
+  const { profile, faceEmbeddings, setFacePoseEmbedding, updateAcademicProfile } = useAccountStore();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -89,6 +90,7 @@ export default function StudentFaceSetupPage() {
   const [liveLuminance, setLiveLuminance] = useState(124);
   const [liveEar, setLiveEar] = useState(0.27);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [registrationError, setRegistrationError] = useState<string | null>(null);
 
   if (!trackerRef.current) {
     trackerRef.current = new RealFaceTrackerSession();
@@ -103,42 +105,41 @@ export default function StudentFaceSetupPage() {
           ? latestEmbeddingRef.current
           : extract192dBiometricDescriptor([]);
 
-      // Save to backend /v1/student/face-embedding
-      await lmsApi.saveFaceEmbedding({
-        pose: stepConfig.poseKey,
-        embedding: vec192,
-        headYawDeg: yawToUse,
-        headPitchDeg: latestPitchRef.current,
-      });
-
+      // Each pose stays on the device until all three exist: POST /v1/student/face replaces every stored pose.
       setFacePoseEmbedding(stepConfig.poseKey, vec192);
       setCapturedYaws((prev) => ({
         ...prev,
         [stepConfig.step]: `${yawToUse > 0 ? '+' : ''}${yawToUse.toFixed(1)}°`,
       }));
+      const nextSteps = Array.from(new Set([...completedSteps, stepConfig.step]));
+      setCompletedSteps(nextSteps);
+      setRegistrationError(null);
 
-      setCompletedSteps((prev) => {
-        const next = Array.from(new Set([...prev, stepConfig.step]));
-        if (next.length >= 3) {
-          completeFaceRegistration();
-          const currentEmbeddings = useAccountStore.getState().faceEmbeddings;
-          lmsApi.registerFaceEmbeddings({
-            front: currentEmbeddings.front || vec192,
-            left: currentEmbeddings.left || vec192,
-            right: currentEmbeddings.right || vec192,
+      const yawLabel = `${yawToUse > 0 ? '+' : ''}${yawToUse.toFixed(1)}°`;
+      if (nextSteps.length >= 3) {
+        const captured = useAccountStore.getState().faceEmbeddings;
+        try {
+          await lmsApi.registerFaceEmbeddings({
+            front: captured.front || vec192,
+            left: captured.left || vec192,
+            right: captured.right || vec192,
           });
+          updateAcademicProfile({ faceRegistered: true });
+          setStatusMessage(
+            `Đã trích xuất vector 192-d cho ${stepConfig.title} (Yaw ${yawLabel}) và đăng ký đủ 3 góc mặt lên máy chủ.`,
+          );
+        } catch (err) {
+          setStatusMessage(null);
+          setRegistrationError(`Chưa lưu được dữ liệu khuôn mặt lên máy chủ: ${describeApiError(err)}`);
         }
-        return next;
-      });
-
-      setStatusMessage(
-        `Đã trích xuất thành công vector 192-d chuẩn hóa L2 cho ${stepConfig.title} (Yaw ${
-          yawToUse > 0 ? '+' : ''
-        }${yawToUse.toFixed(1)}°) và lưu vào /v1/student/face-embedding!`,
-      );
+      } else {
+        setStatusMessage(
+          `Đã trích xuất vector 192-d chuẩn hóa L2 cho ${stepConfig.title} (Yaw ${yawLabel}). Hoàn tất đủ 3 góc để lưu lên máy chủ.`,
+        );
+      }
       setCapturingStep(null);
     },
-    [completeFaceRegistration, setFacePoseEmbedding, streamingLive],
+    [completedSteps, setFacePoseEmbedding, streamingLive, updateAcademicProfile],
   );
 
   // Live Webcam + RealFaceTrackerSession loop
@@ -278,7 +279,7 @@ export default function StudentFaceSetupPage() {
     <Container className="space-y-6">
       <PageHeader
         title="Đăng ký Sinh trắc Khuôn mặt 3 Góc (MobileFaceNet 192 chiều)"
-        description="Trích xuất vector đặc trưng khuôn mặt chuẩn hóa L2 từ Webcam thời gian thực (Chính diện, Nghiêng trái Yaw < -18°, Nghiêng phải Yaw > +18°) lưu vào /v1/student/face-embedding."
+        description="Trích xuất vector đặc trưng khuôn mặt chuẩn hóa L2 từ Webcam thời gian thực (Chính diện, Nghiêng trái Yaw < -18°, Nghiêng phải Yaw > +18°) lưu vào /v1/student/face."
         actions={
           <Badge tone={completedSteps.length >= 3 ? 'success' : 'warning'} icon="verified_user">
             {completedSteps.length >= 3
@@ -287,6 +288,8 @@ export default function StudentFaceSetupPage() {
           </Badge>
         }
       />
+
+      {registrationError && <LoadError message={registrationError} />}
 
       {statusMessage && (
         <div className="flex items-center justify-between gap-2 rounded-xl bg-green-50 px-4 py-3 text-xs text-green-900">
@@ -396,7 +399,7 @@ export default function StudentFaceSetupPage() {
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-subtle pt-3">
                   <span className="text-xs text-secondary">
-                    Vector 192-d L2-Normalized → POST `/v1/student/face-embedding`
+                    Vector 192-d L2-Normalized → POST `/v1/student/face`
                   </span>
                   <Button
                     size="xs"

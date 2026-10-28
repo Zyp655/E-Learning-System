@@ -32,12 +32,18 @@ import {
 import PageTitle from '../../components/PageTitle';
 import FilterBar from '../../components/FilterBar';
 import usersApi from '../../api/users';
+import { showApiError } from '../../utils/api';
 
 const { confirm } = Modal;
 const { Text } = Typography;
 const { TextArea } = Input;
 
-const formatTimestamp = (sec = 0) => {
+const DASH = '-';
+const isMissing = (v) => v === undefined || v === null || v === '';
+const orDash = (v) => (isMissing(v) ? DASH : v);
+
+const formatTimestamp = (sec) => {
+  if (isMissing(sec)) return DASH;
   const s = Math.max(0, Number(sec) || 0);
   const mins = Math.floor(s / 60);
   const rem = Math.floor(s % 60);
@@ -49,6 +55,10 @@ const VIOLATION_STATUS_MAP = {
   reviewed: { color: 'processing', label: 'Đã xem xét (reviewed)' },
   excused: { color: 'success', label: 'Đã miễn trừ (excused)' },
   penalized: { color: 'error', label: 'Đã xác nhận vi phạm (penalized)' },
+  // lms-api ProctoringViolation.status values.
+  resolved: { color: 'success', label: 'Đã giải quyết (resolved)' },
+  flagged: { color: 'error', label: 'Đã gắn cờ (flagged)' },
+  dismissed: { color: 'default', label: 'Đã bỏ qua (dismissed)' },
 };
 
 const SUBMISSION_STATUS_MAP = {
@@ -56,6 +66,8 @@ const SUBMISSION_STATUS_MAP = {
   pending_review: { color: 'warning', label: 'Chờ hậu kiểm (pending_review)' },
   verified: { color: 'success', label: 'Hợp lệ / Chính chủ (verified)' },
   rejected: { color: 'volcano', label: 'Hủy kết quả bài nộp (rejected)' },
+  clean: { color: 'green', label: 'Không phát hiện trùng lặp (clean)' },
+  unchecked: { color: 'default', label: 'Chưa có báo cáo tương đồng' },
 };
 
 export default function ProctoringMonitor({ embedded = false }) {
@@ -79,12 +91,17 @@ export default function ProctoringMonitor({ embedded = false }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [vList, sList] = await Promise.all([
+      const [vRes, sRes] = await Promise.allSettled([
         usersApi.getProctoringViolations(filters),
         usersApi.getSubmissionIntegrityAlerts({ keyword: filters.keyword }),
       ]);
-      setViolations(vList || []);
-      setSubmissions(sList || []);
+      setViolations(vRes.status === 'fulfilled' ? vRes.value || [] : []);
+      setSubmissions(sRes.status === 'fulfilled' ? sRes.value || [] : []);
+      // One toast per failed load; showApiError stays silent when utils/api already toasted (401 / 5xx).
+      const failed = [vRes, sRes].find((r) => r.status === 'rejected');
+      if (failed) {
+        showApiError(failed.reason, 'Không tải được dữ liệu giám sát từ máy chủ');
+      }
     } finally {
       setLoading(false);
     }
@@ -110,10 +127,15 @@ export default function ProctoringMonitor({ embedded = false }) {
   const handleConfirmResolution = async () => {
     const { record, targetStatus, adminNote } = reviewModal;
     if (!record) return;
-    await usersApi.resolveProctoringViolation(record.id, {
-      status: targetStatus,
-      adminNote,
-    });
+    try {
+      await usersApi.resolveProctoringViolation(record.id, {
+        status: targetStatus,
+        adminNote,
+      });
+    } catch (error) {
+      showApiError(error, 'Máy chủ từ chối cập nhật vi phạm, trạng thái chưa thay đổi');
+      return;
+    }
     message.success(
       targetStatus === 'penalized'
         ? `Đã xác nhận vi phạm đối với sinh viên ${record.student_name}`
@@ -127,16 +149,21 @@ export default function ProctoringMonitor({ embedded = false }) {
     confirm({
       title: `Yêu cầu "${record.student_name}" đăng ký lại khuôn mặt 3 góc?`,
       content:
-        'Hệ thống sẽ gọi đồng thời DELETE /v1/admin/users/:id/face và DELETE /v1/student/face để xóa vector MobileFaceNet 192 chiều hiện tại và đánh dấu hồ sơ cần đăng ký lại trước khi vào bài giảng tiếp theo.',
+        'Hệ thống sẽ gọi DELETE /v1/admin/users/:id/face để xóa vector MobileFaceNet 192 chiều hiện tại và đánh dấu hồ sơ cần đăng ký lại trước khi vào bài giảng tiếp theo.',
       okText: 'Xóa Face Vector & Yêu cầu Đăng ký lại',
       okType: 'danger',
       cancelText: 'Hủy',
       onOk: async () => {
-        await usersApi.resetFaceEmbedding(record.user_id || record.id);
-        await usersApi.resolveProctoringViolation(record.id, {
-          status: 'reviewed',
-          adminNote: 'Đã xóa FaceEmbeddings cũ và yêu cầu sinh viên đăng ký lại khuôn mặt 3 góc.',
-        });
+        try {
+          await usersApi.resetFaceEmbedding(record.user_id || record.id);
+          await usersApi.resolveProctoringViolation(record.id, {
+            status: 'reviewed',
+            adminNote: 'Đã xóa FaceEmbeddings cũ và yêu cầu sinh viên đăng ký lại khuôn mặt 3 góc.',
+          });
+        } catch (error) {
+          showApiError(error, 'Máy chủ từ chối yêu cầu, trạng thái chưa thay đổi');
+          return;
+        }
         message.success(
           `Đã xóa vector khuôn mặt và gửi yêu cầu đăng ký lại cho ${record.student_name}`
         );
@@ -146,7 +173,12 @@ export default function ProctoringMonitor({ embedded = false }) {
   };
 
   const handleSubmissionAction = async (record, nextStatus) => {
-    await usersApi.updateSubmissionIntegrityStatus(record.id, nextStatus);
+    try {
+      await usersApi.updateSubmissionIntegrityStatus(record.id, nextStatus);
+    } catch (error) {
+      showApiError(error, 'Không lưu được kết luận hậu kiểm');
+      return;
+    }
     message.success(
       nextStatus === 'verified'
         ? `Đã xác nhận bài nộp của ${record.student_name} đạt chuẩn liêm chính học thuật`
@@ -170,10 +202,16 @@ export default function ProctoringMonitor({ embedded = false }) {
       width: 195,
       render: (_, r) => (
         <div>
-          <div style={{ fontWeight: 600, color: '#0A3150' }}>{r.student_name}</div>
-          <Tag color="geekblue" style={{ marginTop: 2 }}>
-            {r.student_code}
-          </Tag>
+          <div style={{ fontWeight: 600, color: '#0A3150' }}>{orDash(r.student_name)}</div>
+          {r.student_code ? (
+            <Tag color="geekblue" style={{ marginTop: 2 }}>
+              {r.student_code}
+            </Tag>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {DASH}
+            </Text>
+          )}
         </div>
       ),
     },
@@ -183,9 +221,9 @@ export default function ProctoringMonitor({ embedded = false }) {
       render: (_, r) => (
         <div>
           <div style={{ fontWeight: 600, color: '#0A3150', fontSize: 13 }}>
-            {r.course_title}
+            {orDash(r.course_title)}
           </div>
-          <div style={{ fontSize: 12, color: '#4b5563' }}>{r.lesson_title}</div>
+          <div style={{ fontSize: 12, color: '#4b5563' }}>{orDash(r.lesson_title)}</div>
           {r.details && (
             <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
               ↳ {r.details}
@@ -204,11 +242,14 @@ export default function ProctoringMonitor({ embedded = false }) {
       dataIndex: 'video_timestamp_sec',
       key: 'video_timestamp_sec',
       width: 110,
-      render: (sec) => (
-        <Tag color="blue" icon={<ClockCircleOutlined />}>
-          [{formatTimestamp(sec)}]
-        </Tag>
-      ),
+      render: (sec) =>
+        isMissing(sec) ? (
+          DASH
+        ) : (
+          <Tag color="blue" icon={<ClockCircleOutlined />}>
+            [{formatTimestamp(sec)}]
+          </Tag>
+        ),
     },
     {
       title: 'Loại Vi phạm (`violation_type`)',
@@ -222,18 +263,22 @@ export default function ProctoringMonitor({ embedded = false }) {
               Không khớp khuôn mặt chủ TK
             </Tag>
             <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>
-              <code>identity_mismatch</code> ({r.consecutive_fails || 3} chu kỳ liên tiếp)
+              <code>identity_mismatch</code>
+              {!isMissing(r.consecutive_fails) && ` (${r.consecutive_fails} chu kỳ liên tiếp)`}
+            </div>
+          </div>
+        ) : type === 'face_absent_30s' ? (
+          <div>
+            <Tag color="volcano" icon={<WarningOutlined />}>
+              Vắng mặt ({isMissing(r.absent_duration_sec) ? DASH : `${r.absent_duration_sec}s`})
+            </Tag>
+            <div style={{ fontSize: 11, color: '#d97706', marginTop: 2 }}>
+              <code>face_absent_30s</code>
+              {!isMissing(r.consecutive_fails) && ` (${r.consecutive_fails} lần quét x 5s)`}
             </div>
           </div>
         ) : (
-          <div>
-            <Tag color="volcano" icon={<WarningOutlined />}>
-              Vắng mặt quá 30s ({r.absent_duration_sec || 30}s)
-            </Tag>
-            <div style={{ fontSize: 11, color: '#d97706', marginTop: 2 }}>
-              <code>face_absent_30s</code> ({r.consecutive_fails || 6} lần quét x 5s)
-            </div>
-          </div>
+          <Tag>{orDash(type)}</Tag>
         ),
     },
     {
@@ -241,19 +286,23 @@ export default function ProctoringMonitor({ embedded = false }) {
       key: 'cosine_similarity',
       width: 175,
       render: (_, r) => {
-        const pct = Math.round((Number(r.cosine_similarity) || 0) * 1000) / 10;
-        const thresholdPct = Math.round((Number(r.threshold_required) || 0.55) * 100);
+        if (isMissing(r.cosine_similarity)) return DASH;
+        const pct = Math.round(Number(r.cosine_similarity) * 1000) / 10;
+        const hasThreshold = !isMissing(r.threshold_required);
+        const thresholdPct = hasThreshold ? Math.round(Number(r.threshold_required) * 100) : null;
         return (
           <div>
             <Progress
               percent={pct}
               size="small"
-              status={pct < thresholdPct ? 'exception' : 'success'}
+              status={hasThreshold && pct < thresholdPct ? 'exception' : 'normal'}
               format={() => `${pct}%`}
             />
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              Ngưỡng chuẩn: &ge; {thresholdPct}%
-            </Text>
+            {hasThreshold && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Ngưỡng chuẩn: &ge; {thresholdPct}%
+              </Text>
+            )}
           </div>
         );
       },
@@ -264,8 +313,8 @@ export default function ProctoringMonitor({ embedded = false }) {
       key: 'status',
       width: 165,
       render: (st) => {
-        const meta = VIOLATION_STATUS_MAP[st] || VIOLATION_STATUS_MAP.pending;
-        return <Tag color={meta.color}>{meta.label}</Tag>;
+        const meta = VIOLATION_STATUS_MAP[st];
+        return meta ? <Tag color={meta.color}>{meta.label}</Tag> : <Tag>{orDash(st)}</Tag>;
       },
     },
     {
@@ -313,10 +362,16 @@ export default function ProctoringMonitor({ embedded = false }) {
       width: 195,
       render: (_, r) => (
         <div>
-          <div style={{ fontWeight: 600, color: '#0A3150' }}>{r.student_name}</div>
-          <Tag color="geekblue" style={{ marginTop: 2 }}>
-            {r.student_code}
-          </Tag>
+          <div style={{ fontWeight: 600, color: '#0A3150' }}>{orDash(r.student_name)}</div>
+          {r.student_code ? (
+            <Tag color="geekblue" style={{ marginTop: 2 }}>
+              {r.student_code}
+            </Tag>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {DASH}
+            </Text>
+          )}
         </div>
       ),
     },
@@ -325,11 +380,13 @@ export default function ProctoringMonitor({ embedded = false }) {
       key: 'assignment',
       render: (_, r) => (
         <div>
-          <div style={{ fontWeight: 600, color: '#0A3150' }}>{r.assignment_title}</div>
-          <div style={{ fontSize: 12, color: '#4b5563' }}>{r.course_title}</div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>
-            🔍 Đối sánh AST/Embedding: {r.matched_source}
-          </div>
+          <div style={{ fontWeight: 600, color: '#0A3150' }}>{orDash(r.assignment_title)}</div>
+          <div style={{ fontSize: 12, color: '#4b5563' }}>{orDash(r.course_title)}</div>
+          {r.matched_source && (
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>
+              🔍 {r.matched_source}
+            </div>
+          )}
         </div>
       ),
     },
@@ -358,7 +415,8 @@ export default function ProctoringMonitor({ embedded = false }) {
       key: 'similarity_score',
       width: 210,
       render: (score) => {
-        const val = Number(score || 0);
+        if (isMissing(score)) return DASH;
+        const val = Number(score);
         const strokeColor =
           val >= 60 ? '#dc2626' : val >= 30 ? '#d97706' : '#10b981';
         return (
@@ -385,16 +443,21 @@ export default function ProctoringMonitor({ embedded = false }) {
       title: 'AI Auto-Grade & Độ tin cậy',
       key: 'ai_grade',
       width: 170,
-      render: (_, r) => (
-        <div>
-          <div style={{ fontWeight: 600, color: '#0A3150' }}>
-            Điểm gợi ý: {r.ai_grade_score} / 10
+      render: (_, r) =>
+        isMissing(r.ai_grade_score) ? (
+          <Text type="secondary">{DASH} (chưa chấm tự động)</Text>
+        ) : (
+          <div>
+            <div style={{ fontWeight: 600, color: '#0A3150' }}>
+              Điểm gợi ý: {r.ai_grade_score}
+            </div>
+            {!isMissing(r.ai_grade_confidence) && (
+              <Tag color="purple" style={{ marginTop: 2 }}>
+                Confidence: {Math.round(Number(r.ai_grade_confidence) * 100)}%
+              </Tag>
+            )}
           </div>
-          <Tag color="purple" style={{ marginTop: 2 }}>
-            Confidence: {Math.round((Number(r.ai_grade_confidence) || 0.9) * 100)}%
-          </Tag>
-        </div>
-      ),
+        ),
     },
     {
       title: 'Trạng thái',
@@ -402,34 +465,39 @@ export default function ProctoringMonitor({ embedded = false }) {
       key: 'status',
       width: 170,
       render: (st) => {
-        const meta = SUBMISSION_STATUS_MAP[st] || SUBMISSION_STATUS_MAP.pending_review;
-        return <Tag color={meta.color}>{meta.label}</Tag>;
+        const meta = SUBMISSION_STATUS_MAP[st];
+        return meta ? <Tag color={meta.color}>{meta.label}</Tag> : <Tag>{orDash(st)}</Tag>;
       },
     },
     {
       title: 'Hậu kiểm Học thuật',
       key: 'actions',
       width: 210,
-      render: (_, record) => (
-        <Space size={6} wrap>
-          <Button
-            size="small"
-            type="primary"
-            icon={<CheckCircleOutlined />}
-            onClick={() => handleSubmissionAction(record, 'verified')}
-          >
-            Công nhận hợp lệ
-          </Button>
-          <Button
-            size="small"
-            danger
-            icon={<CloseCircleOutlined />}
-            onClick={() => handleSubmissionAction(record, 'rejected')}
-          >
-            Kết luận đạo văn
-          </Button>
-        </Space>
-      ),
+      render: (_, record) =>
+        record.review_supported ? (
+          <Space size={6} wrap>
+            <Button
+              size="small"
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              onClick={() => handleSubmissionAction(record, 'verified')}
+            >
+              Công nhận hợp lệ
+            </Button>
+            <Button
+              size="small"
+              danger
+              icon={<CloseCircleOutlined />}
+              onClick={() => handleSubmissionAction(record, 'rejected')}
+            >
+              Kết luận đạo văn
+            </Button>
+          </Space>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            lms-api chưa hỗ trợ lưu kết luận hậu kiểm (chỉ xem)
+          </Text>
+        ),
     },
   ];
 

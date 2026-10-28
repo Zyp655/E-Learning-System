@@ -4,25 +4,25 @@ import "time"
 
 type Course struct {
 	BaseEntity
-	TeacherID        int64    `json:"teacherId" gorm:"index;not null"`
-	Teacher          *User    `json:"teacher,omitempty" gorm:"foreignKey:TeacherID"`
-	AcademicCourseID int64    `json:"academicCourseId" gorm:"index"`
-	MajorID          int64    `json:"majorId" gorm:"index"`
-	Title            string   `json:"title" gorm:"type:varchar(255);not null"`
-	Slug             string   `json:"slug" gorm:"type:varchar(255);uniqueIndex"`
-	Description      string   `json:"description" gorm:"type:text"`
-	ShortDesc        string   `json:"shortDesc" gorm:"type:text"`
-	Category         string   `json:"category" gorm:"type:varchar(100);default:'Computer Science'"`
-	Level            string   `json:"level" gorm:"type:varchar(32);default:'intermediate'"`
-	ThumbnailURL     string   `json:"thumbnailUrl" gorm:"column:thumbnail_url;type:text"`
-	PreviewVideo     string   `json:"previewVideo" gorm:"type:text"`
-	TagsJSON         string   `json:"tagsJson" gorm:"column:tags_json;type:text"`
-	IsPublished      bool     `json:"isPublished" gorm:"not null;default:true"`
-	TotalStudents    int      `json:"totalStudents" gorm:"default:0"`
-	TotalLessons     int      `json:"totalLessons" gorm:"default:0"`
-	TotalDurationSec int      `json:"totalDurationSec" gorm:"default:0"`
-	RatingAvg        float64  `json:"ratingAvg" gorm:"default:4.8"`
-	RatingCount      int      `json:"ratingCount" gorm:"default:0"`
+	TeacherID        int64        `json:"teacherId" gorm:"index;not null"`
+	Teacher          *User        `json:"teacher,omitempty" gorm:"foreignKey:TeacherID"`
+	AcademicCourseID int64        `json:"academicCourseId" gorm:"index"`
+	MajorID          int64        `json:"majorId" gorm:"index"`
+	Title            string       `json:"title" gorm:"type:varchar(255);not null"`
+	Slug             string       `json:"slug" gorm:"type:varchar(255);uniqueIndex"`
+	Description      string       `json:"description" gorm:"type:text"`
+	ShortDesc        string       `json:"shortDesc" gorm:"type:text"`
+	Category         string       `json:"category" gorm:"type:varchar(100);default:'Computer Science'"`
+	Level            string       `json:"level" gorm:"type:varchar(32);default:'intermediate'"`
+	ThumbnailURL     string       `json:"thumbnailUrl" gorm:"column:thumbnail_url;type:text"`
+	PreviewVideo     string       `json:"previewVideo" gorm:"type:text"`
+	TagsJSON         string       `json:"tagsJson" gorm:"column:tags_json;type:text"`
+	IsPublished      bool         `json:"isPublished" gorm:"not null;default:true"`
+	TotalStudents    int          `json:"totalStudents" gorm:"default:0"`
+	TotalLessons     int          `json:"totalLessons" gorm:"default:0"`
+	TotalDurationSec int          `json:"totalDurationSec" gorm:"default:0"`
+	RatingAvg        float64      `json:"ratingAvg" gorm:"default:4.8"`
+	RatingCount      int          `json:"ratingCount" gorm:"default:0"`
 	EmbeddingJSON    string       `json:"-" gorm:"column:embedding_json;type:text"`
 	Modules          []Module     `json:"modules,omitempty" gorm:"foreignKey:CourseID"`
 	Files            []CourseFile `json:"files,omitempty" gorm:"foreignKey:CourseID"`
@@ -254,4 +254,3 @@ type CodingSubmission struct {
 }
 
 func (CodingSubmission) TableName() string { return "coding_submissions" }
-

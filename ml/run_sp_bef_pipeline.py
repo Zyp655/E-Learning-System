@@ -63,7 +63,8 @@ SEED = 42
 np.random.seed(SEED)
 
 BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
+# SP_BEF_DATA_DIR overrides the (gitignored, ~34 GB) data directory, e.g. to simulate a clean clone.
+DATA_DIR = Path(os.environ.get("SP_BEF_DATA_DIR") or BASE_DIR / "data")
 RAW_DIR = DATA_DIR / "raw"
 DAISEE_DIR = DATA_DIR / "daisee_frames"
 # Per-frame MediaPipe telemetry of the original DAiSEE videos (written by extract_daisee_video_frames.py).
@@ -72,6 +73,10 @@ DAISEE_VIDEO_LABELS = RAW_DIR / "daisee_video" / "x" / "DAiSEE" / "Labels" / "Al
 MODELS_DIR = BASE_DIR / "models"
 GOLDEN_DIR = BASE_DIR / "golden"
 OUTPUT_V2_DIR = BASE_DIR / "output_v2"
+# Deterministic ONNX graph name for the exported face branch (see run_p2_face_branch). The value is the
+# name already stored in the committed ml/models/sp_bef_face.onnx, so re-exports stay byte-identical with
+# the shipped artifact and with `onnx_size_bytes` recorded in models/sp_bef_params.json.
+ONNX_FACE_GRAPH_NAME = "bb76a2e21b604e3ea3a861898a3f6061"
 
 for d in [MODELS_DIR, GOLDEN_DIR, OUTPUT_V2_DIR]:
     d.mkdir(parents=True, exist_ok=True)
@@ -601,8 +606,11 @@ def run_p2_face_branch(df_raw_clips: pd.DataFrame) -> Tuple[Dict, pd.DataFrame, 
         cfgs[name] = _linear_branch_cfg(pipe, cols, base_rate_face, xp, fp)
 
     pipe_sel, cols_sel, _ = fitted[selected]
+    # Fixed graph name: skl2onnx otherwise draws a random UUID, so every run (including the pytest
+    # reproducibility check) rewrote the tracked ONNX files with byte-level noise.
     onnx_model = convert_sklearn(
         pipe_sel,
+        name=ONNX_FACE_GRAPH_NAME,
         initial_types=[("float_input", FloatTensorType([None, len(cols_sel)]))],
         options={id(pipe_sel.named_steps["clf"]): {"zipmap": False}},
         target_opset=15,
@@ -867,6 +875,63 @@ def run_p3_behavior_and_prior() -> Tuple[Dict, Dict, pd.DataFrame, pd.DataFrame]
     return beh_cfg, prior_cfg, df_va, df_te
 
 
+SENSITIVITY_THRESHOLDS = (0.10, 0.20, 0.40, 0.70)
+SENSITIVITY_QUANTILES = (0.25, 0.50, 0.75)
+
+
+def distinct_threshold_labelings(
+    values: np.ndarray,
+    candidate_thresholds=SENSITIVITY_THRESHOLDS,
+    quantiles=SENSITIVITY_QUANTILES,
+) -> List[Dict]:
+    """
+    Groups label thresholds by the labeling they actually produce on `values`.
+
+    confidence(CONFUSED) in ASSISTments takes only a handful of discrete values, so different thresholds
+    often give identical labels (0.10 and 0.20 both cut just below 0.378). Besides the requested
+    `candidate_thresholds`, a data-driven threshold is added at each quantile of the positive values,
+    placed at the midpoint below the distinct value holding that quantile so it is a real cut point.
+    Thresholds that give an all-positive or all-negative labeling are dropped.
+
+    Returns one entry per distinct labeling, ordered by cut point:
+    `threshold` (a requested threshold if one maps to this labeling, else the midpoint),
+    `equivalent_thresholds` (requested thresholds with the same labels), `threshold_range` ([lo, hi]:
+    every threshold in (lo, hi] gives these labels), `base_rate` (share of values >= hi).
+    """
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    levels = np.unique(v)
+    if len(levels) < 2:
+        return []
+
+    positives = v[v > levels[0]]
+    data_driven = []
+    for q in quantiles:
+        level = float(np.quantile(positives, q, method="lower"))
+        idx = int(np.searchsorted(levels, level))
+        data_driven.append(round(float((levels[idx - 1] + levels[idx]) / 2.0), 4))
+
+    groups: Dict[int, Dict] = {}
+    for th, requested in [(float(t), True) for t in candidate_thresholds] + [(t, False) for t in data_driven]:
+        cut = int(np.searchsorted(levels, th, side="left"))  # first distinct value labelled positive
+        if cut <= 0 or cut >= len(levels):
+            continue
+        g = groups.setdefault(cut, {"requested": [], "midpoint": th})
+        if requested and th not in g["requested"]:
+            g["requested"].append(th)
+
+    out = []
+    for cut in sorted(groups):
+        g = groups[cut]
+        out.append({
+            "threshold": g["requested"][0] if g["requested"] else g["midpoint"],
+            "equivalent_thresholds": sorted(g["requested"]),
+            "threshold_range": [round(float(levels[cut - 1]), 4), round(float(levels[cut]), 4)],
+            "base_rate": round(float(np.mean(v >= levels[cut])), 4),
+        })
+    return out
+
+
 def run_p4_quiz_branch() -> Tuple[Dict, pd.DataFrame, pd.DataFrame]:
     """
     P4: Parse real ASSISTments 2017 CSV (`anonymized_full_release_competition_dataset.csv`),
@@ -925,16 +990,22 @@ def run_p4_quiz_branch() -> Tuple[Dict, pd.DataFrame, pd.DataFrame]:
     p_te_cal = np.array([piecewise_linear_interp(float(p), xp_quiz, fp_quiz) for p in p_te_raw])
     base_rate_quiz = float(np.mean(y_tr))
 
-    # Sensitivity analysis across thresholds 0.10, 0.40, 0.70
+    # Sensitivity analysis over label thresholds. confidence(CONFUSED) is discrete, so thresholds are grouped
+    # by the labeling they produce and each distinct labeling is evaluated once.
+    labelings = distinct_threshold_labelings(df_quiz["conf_raw"].values)
     sensitivity = {}
-    for th in [0.10, 0.40, 0.70]:
+    for lab in labelings:
+        th = lab["threshold"]
         y_tr_th = (df_tr["conf_raw"].values >= th).astype(int)
         y_te_th = (df_te["conf_raw"].values >= th).astype(int)
         m_th = Pipeline([("s", StandardScaler()), ("c", LogisticRegression(C=1.0, random_state=SEED))])
         m_th.fit(X_tr, y_tr_th)
         p_th = m_th.predict_proba(X_te)[:, 1]
-        sensitivity[f"th_{th:.2f}"] = {
+        sensitivity[f"th_{th:.4g}"] = {
             "base_rate": round(float(np.mean(y_tr_th)), 4),
+            "base_rate_all": lab["base_rate"],
+            "threshold_range": lab["threshold_range"],
+            "equivalent_thresholds": lab["equivalent_thresholds"],
             "test_auroc": round(float(roc_auc_score(y_te_th, p_th)), 4),
             "test_auprc": round(float(average_precision_score(y_te_th, p_th)), 4),
         }
@@ -956,6 +1027,7 @@ def run_p4_quiz_branch() -> Tuple[Dict, pd.DataFrame, pd.DataFrame]:
         "test_ece_calibrated": round(compute_ece(y_te, p_te_cal), 4),
         "test_brier": round(float(brier_score_loss(y_te, p_te_cal)), 4),
         "threshold_sensitivity": sensitivity,
+        "label_confidence_distinct_values": int(df_quiz["conf_raw"].nunique()),
     }
     for df in (df_va, df_te):
         _attach_branch_outputs(df, quiz_cfg)
@@ -1465,9 +1537,22 @@ def write_report_v2(manifest: Dict, sp_bef_params: Dict) -> None:
         f"{c['episode_recall']:.2f} | {fmt_latency(c['mean_detection_latency_sec'])} | {c['false_interventions_per_hour']:.2f} |"
         for c in ev["comparison_table"]
     )
-    sens_rows = "\n".join(
-        f"| `{k}` | {v['base_rate']:.4f} | {v['test_auroc']:.4f} | {v['test_auprc']:.4f} |"
-        for k, v in qm["threshold_sensitivity"].items()
+    def fmt_sens_row(k, v):
+        rng = v.get("threshold_range")
+        rng_txt = f"({rng[0]:.4f}, {rng[1]:.4f}]" if rng else "—"
+        eq = ", ".join(f"{t:.2f}" for t in v.get("equivalent_thresholds", [])) or "—"
+        return f"| `{k}` | {rng_txt} | {eq} | {v['base_rate']:.4f} | {v['test_auroc']:.4f} | {v['test_auprc']:.4f} |"
+
+    sens_rows = "\n".join(fmt_sens_row(k, v) for k, v in qm["threshold_sensitivity"].items())
+    n_conf_levels = qm.get("label_confidence_distinct_values")
+    sens_note = (
+        f"confidence(CONFUSED) chỉ có {n_conf_levels} giá trị rời rạc, nên nhiều ngưỡng cho cùng một cách gán nhãn. "
+        f"Bảng gộp các ngưỡng theo cách gán nhãn thực tế: mỗi dòng là một cách gán nhãn khác nhau, "
+        f"mọi ngưỡng trong khoảng (lo, hi] cho cùng nhãn; cột \"Ngưỡng tương đương\" liệt kê các ngưỡng "
+        f"{', '.join(f'{t:.2f}' for t in SENSITIVITY_THRESHOLDS)} rơi vào dòng đó, các dòng còn lại là ngưỡng lấy theo "
+        f"phân vị {', '.join(f'{q:.2f}' for q in SENSITIVITY_QUANTILES)} của các giá trị dương."
+        if n_conf_levels
+        else ""
     )
     cand_rows = "\n".join(
         f"| `{k}` | {v['val_auroc']:.4f} | {v['val_auprc']:.4f} |" for k, v in fm["candidates_val"].items()
@@ -1529,8 +1614,10 @@ Chọn bộ đặc trưng trên **validation**:
 - Nhãn: {qm['label_definition']}. Lưu ý: {qm['label_caveat']}.
 - Test: **AUROC = {qm['test_auroc']:.4f}** (95% CI {qm['test_auroc_ci95']}), AUPRC = {qm['test_auprc']:.4f} (luôn-âm = {qm['always_negative_auprc']:.4f}), ECE = {qm['test_ece_calibrated']:.4f}, Brier = {qm['test_brier']:.4f}.
 
-| Ngưỡng nhãn | Base rate | Test AUROC | Test AUPRC |
-| :--- | :--- | :--- | :--- |
+{sens_note}
+
+| Ngưỡng nhãn | Khoảng ngưỡng cùng nhãn | Ngưỡng tương đương | Base rate (train) | Test AUROC | Test AUPRC |
+| :--- | :--- | :--- | :--- | :--- | :--- |
 {sens_rows}
 
 ## 3. Fusion — Virtual Learner (bán tổng hợp)
@@ -1597,6 +1684,12 @@ def main() -> None:
     }
 
     out_json = MODELS_DIR / "sp_bef_params.json"
+    # The reading-gaze branch is trained separately (07_train_gaze_branch.py) on LMS logs; keep it.
+    if out_json.exists():
+        prev = json.loads(out_json.read_text(encoding="utf-8"))
+        if "gaze" in prev.get("branches", {}):
+            sp_bef_params["branches"]["gaze"] = prev["branches"]["gaze"]
+            sp_bef_params["fusion"]["w_gaze"] = prev.get("fusion", {}).get("w_gaze", 0.0)
     out_json.write_text(json.dumps(sp_bef_params, indent=2), encoding="utf-8")
 
     # Copy sp_bef_params.json to Go Backend and Web Frontend

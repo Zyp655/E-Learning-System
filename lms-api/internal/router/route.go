@@ -138,6 +138,7 @@ func Router(r *ghttp.RouterGroup) {
 			confusionCtrl.PredictConfusion,
 			confusionCtrl.ExplainConfusion,
 			confusionCtrl.LogConfusionSession,
+			confusionCtrl.LogReadingGaze,
 			confusionCtrl.ResolveConfusionEpisode,
 
 			// AI Tutor REST Tools (M8)
@@ -156,6 +157,7 @@ func Router(r *ghttp.RouterGroup) {
 			quizCtrl.GetLeaderboard,
 			quizCtrl.GetQuizStatistics,
 			quizCtrl.CreateQuizRoom,
+			quizCtrl.JoinQuizRoom,
 
 			// Student Submissions & Personal Tasks (M10)
 			assignmentCtrl.ListStudentSubmissions,
@@ -314,6 +316,11 @@ func Router(r *ghttp.RouterGroup) {
 			// Admin Proctoring Violations Management
 			adminCtrl.ListAdminProctoringViolations,
 			adminCtrl.UpdateAdminProctoringViolation,
+
+			// Admin Course Review Moderation & Submission Integrity (read-only)
+			adminCtrl.ListAdminReviews,
+			adminCtrl.DeleteAdminReview,
+			adminCtrl.ListAdminSubmissionIntegrity,
 		)
 	})
 }

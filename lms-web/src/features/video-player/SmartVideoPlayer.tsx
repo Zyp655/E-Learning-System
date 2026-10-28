@@ -40,6 +40,10 @@ const SELF_REPORT_LEVELS: {
 
 export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
   const slideCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const lastVideoTimeRef = useRef(0);
+  // Lessons with a recorded (or generated) lecture play it; the rest fall back to the canvas slide timeline.
+  const hasVideo = Boolean(lesson.videoUrl);
   const pauseStartRef = useRef<number | null>(null);
 
   const [selectedQuizOption, setSelectedQuizOption] = useState<number | null>(null);
@@ -61,6 +65,9 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
     segmentAttempts,
     passedSegments,
     verifyWatchingModalOpen,
+    seekTargetSec,
+    startLesson,
+    clearSeekTarget,
     setCurrentTimeSec,
     setIsPlaying,
     setPlaybackSpeed,
@@ -199,12 +206,72 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
   }, [activeSegment, currentTimeSec, lesson.durationSeconds, playbackSpeed, passedSegments]);
 
   useEffect(() => {
-    renderLectureSlide();
-  }, [renderLectureSlide]);
+    if (!hasVideo) renderLectureSlide();
+  }, [renderLectureSlide, hasVideo]);
 
-  // Playback timer tick
   useEffect(() => {
-    if (!isPlaying) return;
+    startLesson(lesson.id);
+    lastVideoTimeRef.current = 0;
+  }, [lesson.id, startLesson]);
+
+  // Real video: the store drives play / pause, speed and seeks; the video element drives the clock.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!hasVideo || !video) return;
+    if (isPlaying) {
+      video.play().catch(() => setIsPlaying(false));
+    } else {
+      video.pause();
+    }
+  }, [hasVideo, isPlaying, setIsPlaying]);
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = playbackSpeed;
+  }, [playbackSpeed, hasVideo]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (seekTargetSec === null) return;
+    if (hasVideo && video) {
+      video.currentTime = seekTargetSec;
+      lastVideoTimeRef.current = seekTargetSec;
+    }
+    clearSeekTarget();
+  }, [seekTargetSec, hasVideo, clearSeekTarget]);
+
+  /** Opens the quiz of an unpassed segment whose end the playback just crossed. */
+  const openQuizIfSegmentEnded = (prevSec: number, nowSec: number) => {
+    const finishedSeg = lesson.segments.find(
+      (s) => prevSec < s.endTimestamp && nowSec >= s.endTimestamp && !passedSegments[s.id],
+    );
+    if (finishedSeg) {
+      videoRef.current?.pause();
+      setSelectedQuizOption(null);
+      setQuizFeedback(null);
+      openSegmentQuiz(finishedSeg.id);
+    }
+  };
+
+  const handleVideoTimeUpdate = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const now = video.currentTime;
+    const sec = Math.floor(now);
+    if (sec !== currentTimeSec) setCurrentTimeSec(sec);
+    openQuizIfSegmentEnded(lastVideoTimeRef.current, now);
+    lastVideoTimeRef.current = now;
+  };
+
+  const handleVideoEnded = () => {
+    // timeupdate may stop just short of the last segment's end.
+    openQuizIfSegmentEnded(lastVideoTimeRef.current, lesson.durationSeconds);
+    setCurrentTimeSec(lesson.durationSeconds);
+    setIsPlaying(false);
+  };
+
+  // Playback timer tick (slide timeline only)
+  useEffect(() => {
+    if (!isPlaying || hasVideo) return;
     const interval = setInterval(() => {
       const nextSec = Math.min(lesson.durationSeconds, currentTimeSec + 1);
       setCurrentTimeSec(nextSec);
@@ -230,6 +297,7 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
     playbackSpeed,
     setCurrentTimeSec,
     openSegmentQuiz,
+    hasVideo,
   ]);
 
   const handleTogglePlay = () => {
@@ -265,6 +333,13 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
   const handleCaptureFrameForTutor = () => {
     const canvas = slideCanvasRef.current;
     if (!canvas) return;
+    const video = videoRef.current;
+    if (hasVideo && video && video.videoWidth > 0) {
+      // Same-origin video, so the canvas stays readable for toDataURL.
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    }
     const dataUrl = canvas.toDataURL('image/png');
     attachVideoFrame(dataUrl, currentTimeSec);
     setFrameCaptureSuccess(true);
@@ -325,12 +400,33 @@ export function SmartVideoPlayer({ lesson }: SmartVideoPlayerProps) {
       <Card padding="none" className="overflow-hidden">
         {/* Interactive Lecture Canvas Surface */}
         <div className="relative bg-gray-950">
+          {hasVideo && (
+            <video
+              ref={videoRef}
+              src={lesson.videoUrl}
+              preload="metadata"
+              playsInline
+              onClick={handleTogglePlay}
+              onTimeUpdate={handleVideoTimeUpdate}
+              onEnded={handleVideoEnded}
+              onLoadedMetadata={(e) => {
+                e.currentTarget.currentTime = currentTimeSec;
+                lastVideoTimeRef.current = currentTimeSec;
+              }}
+              className="aspect-video w-full cursor-pointer bg-gray-950"
+            >
+              {lesson.captionsUrl && (
+                <track kind="captions" src={lesson.captionsUrl} srcLang="vi" label="Tiếng Việt" />
+              )}
+            </video>
+          )}
+          {/* With a real video the canvas is only used to capture a frame for the AI Tutor. */}
           <canvas
             ref={slideCanvasRef}
             width={880}
             height={400}
             onClick={handleTogglePlay}
-            className="w-full cursor-pointer object-contain"
+            className={hasVideo ? 'hidden' : 'w-full cursor-pointer object-contain'}
           />
 
           {/* Top-right floating Vision Capture & Anti-AFK trigger badges */}

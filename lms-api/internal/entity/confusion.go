@@ -40,18 +40,18 @@ func (ConfusionLog) TableName() string { return "confusion_logs" }
 
 type ConfusionEpisode struct {
 	BaseEntity
-	UserID            int64   `json:"userId" gorm:"index;not null"`
-	CourseID          int64   `json:"courseId" gorm:"index"`
-	LessonID          int64   `json:"lessonId" gorm:"index;not null"`
-	SegmentID         int64   `json:"segmentId" gorm:"index"`
-	VideoTimestamp    int     `json:"videoTimestamp" gorm:"not null"`
-	TriggerSource     string  `json:"triggerSource" gorm:"type:varchar(32);not null"` // ml_model | hybrid_rule | self_report | hybrid
-	MLProbability     float64 `json:"mlProbability" gorm:"not null;default:0"`
-	RuleScore         float64 `json:"ruleScore" gorm:"not null;default:0"`
-	DominantEmotion   string  `json:"dominantEmotion" gorm:"type:varchar(32)"`
-	RetrievalTier     string  `json:"retrievalTier" gorm:"type:varchar(32)"` // vector_semantic | timestamp_match | transcript_slice
-	SummaryText       string  `json:"summaryText" gorm:"type:text"`
-	ContentPointsJSON string  `json:"contentPointsJson" gorm:"column:content_points_json;type:text"`
+	UserID            int64      `json:"userId" gorm:"index;not null"`
+	CourseID          int64      `json:"courseId" gorm:"index"`
+	LessonID          int64      `json:"lessonId" gorm:"index;not null"`
+	SegmentID         int64      `json:"segmentId" gorm:"index"`
+	VideoTimestamp    int        `json:"videoTimestamp" gorm:"not null"`
+	TriggerSource     string     `json:"triggerSource" gorm:"type:varchar(32);not null"` // ml_model | hybrid_rule | self_report | hybrid
+	MLProbability     float64    `json:"mlProbability" gorm:"not null;default:0"`
+	RuleScore         float64    `json:"ruleScore" gorm:"not null;default:0"`
+	DominantEmotion   string     `json:"dominantEmotion" gorm:"type:varchar(32)"`
+	RetrievalTier     string     `json:"retrievalTier" gorm:"type:varchar(32)"` // vector_semantic | timestamp_match | transcript_slice
+	SummaryText       string     `json:"summaryText" gorm:"type:text"`
+	ContentPointsJSON string     `json:"contentPointsJson" gorm:"column:content_points_json;type:text"`
 	HasFrameImage     bool       `json:"hasFrameImage" gorm:"default:false"`
 	Resolved          bool       `json:"resolved" gorm:"not null;default:false"`
 	ResolvedAt        *time.Time `json:"resolvedAt"`
@@ -73,6 +73,35 @@ type SelfReportLog struct {
 }
 
 func (SelfReportLog) TableName() string { return "self_report_logs" }
+
+// ReadingGazeSample is one labelled Reading View paragraph window: the per-paragraph webcam gaze features
+// (ml/sp_bef/core.py GAZE_FEATURES, same column names) plus its label. Training data for the SP-BEF gaze branch.
+type ReadingGazeSample struct {
+	BaseEntity
+	UserID                int64   `json:"userId" gorm:"index;not null"`
+	CourseID              int64   `json:"courseId" gorm:"index"`
+	LessonID              int64   `json:"lessonId" gorm:"index;not null"`
+	ParagraphIndex        int     `json:"paragraphIndex" gorm:"not null;default:0"`
+	LabelSource           string  `json:"labelSource" gorm:"type:varchar(32);index;not null"` // designed_stimulus | self_report
+	StimulusType          string  `json:"stimulusType" gorm:"type:varchar(16)"`               // control | factual | contextual
+	SelfReportLevel       int     `json:"selfReportLevel" gorm:"not null;default:0"`
+	PromptProbability     float64 `json:"promptProbability" gorm:"not null;default:0"`
+	DwellRatio            float64 `json:"dwellRatio" gorm:"not null;default:0"`
+	RereadCount           float64 `json:"rereadCount" gorm:"not null;default:0"`
+	ParaRegressionRate    float64 `json:"paraRegressionRate" gorm:"not null;default:0"`
+	SweepRatio            float64 `json:"sweepRatio" gorm:"not null;default:0"`
+	GazeTransitionEntropy float64 `json:"gazeTransitionEntropy" gorm:"not null;default:0"`
+	SaccadeRate           float64 `json:"saccadeRate" gorm:"not null;default:0"`
+	RGaze                 float64 `json:"rGaze" gorm:"column:r_gaze;not null;default:0"`
+	LLRGaze               float64 `json:"llrGaze" gorm:"column:llr_gaze;not null;default:0"`
+	CalibrationErrorNorm  float64 `json:"calibrationErrorNorm" gorm:"not null;default:0"`
+	TextDifficulty        float64 `json:"textDifficulty" gorm:"not null;default:0"`
+	WordCount             int     `json:"wordCount" gorm:"not null;default:0"`
+	ReadingWpm            float64 `json:"readingWpm" gorm:"not null;default:0"`
+	PosteriorProb         float64 `json:"posteriorProb" gorm:"not null;default:0"`
+}
+
+func (ReadingGazeSample) TableName() string { return "reading_gaze_samples" }
 
 type ProctoringViolation struct {
 	BaseEntity
@@ -118,6 +147,14 @@ type ConfusionSetting struct {
 	CooldownSeconds         int     `json:"cooldownSeconds" gorm:"not null;default:300"`
 	FaceSimilarityThreshold float64 `json:"faceSimilarityThreshold" gorm:"not null;default:0.55"`
 	MaxAbsentChecks         int     `json:"maxAbsentChecks" gorm:"not null;default:6"`
+	// Nullable SP-BEF fusion overrides (NULL = use sp_bef_params.json); see config.SPBEFOverrides.
+	ThetaOn         *float64 `json:"thetaOn,omitempty" gorm:"column:theta_on"`
+	ThetaOff        *float64 `json:"thetaOff,omitempty" gorm:"column:theta_off"`
+	MinHoldSec      *float64 `json:"minHoldSec,omitempty" gorm:"column:min_hold_sec"`
+	WFace           *float64 `json:"wFace,omitempty" gorm:"column:w_face"`
+	WBeh            *float64 `json:"wBeh,omitempty" gorm:"column:w_beh"`
+	WQuiz           *float64 `json:"wQuiz,omitempty" gorm:"column:w_quiz"`
+	HMMKeepConfused *float64 `json:"hmmKeepConfused,omitempty" gorm:"column:hmm_keep_confused"`
 }
 
 func (ConfusionSetting) TableName() string { return "confusion_settings" }

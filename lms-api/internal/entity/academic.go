@@ -83,14 +83,14 @@ func (CourseClass) TableName() string { return "course_classes" }
 
 type CourseClassEnrollment struct {
 	BaseEntity
-	CourseClassID   int64       `json:"courseClassId" gorm:"index;not null"`
+	CourseClassID   int64        `json:"courseClassId" gorm:"index;not null"`
 	CourseClass     *CourseClass `json:"courseClass,omitempty" gorm:"foreignKey:CourseClassID"`
-	StudentID       int64       `json:"studentId" gorm:"index;not null"`
-	Student         *User       `json:"student,omitempty" gorm:"foreignKey:StudentID"`
-	Status          string      `json:"status" gorm:"type:varchar(32);default:'enrolled'"`
-	Source          string      `json:"source" gorm:"type:varchar(32);default:'import'"`
-	ProgressPercent float64     `json:"progressPercent" gorm:"default:0"`
-	FinalScore      *float64    `json:"finalScore"`
+	StudentID       int64        `json:"studentId" gorm:"index;not null"`
+	Student         *User        `json:"student,omitempty" gorm:"foreignKey:StudentID"`
+	Status          string       `json:"status" gorm:"type:varchar(32);default:'enrolled'"`
+	Source          string       `json:"source" gorm:"type:varchar(32);default:'import'"`
+	ProgressPercent float64      `json:"progressPercent" gorm:"default:0"`
+	FinalScore      *float64     `json:"finalScore"`
 }
 
 func (CourseClassEnrollment) TableName() string { return "course_class_enrollments" }

@@ -10,7 +10,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",
-    "lint": "next lint",
+    "lint": "node scripts/run-eslint.mjs",
+    "lint:setup": "npm ci --prefix tools/eslint --prefer-offline --no-audit --no-fund",
     "lint:ds": "node scripts/design-system/lint.mjs",
     "test:unit": "vitest run"
   },

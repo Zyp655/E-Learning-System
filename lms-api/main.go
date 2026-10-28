@@ -21,6 +21,14 @@ import (
 
 func main() {
 	cfg := config.GetConfig()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
+	// Decide on the demo seed before touching the DB so a weak production password fails fast.
+	seedEnabled, seedPassword, err := cfg.DemoSeedPlan()
+	if err != nil {
+		log.Fatalf("Invalid demo seed configuration: %v", err)
+	}
 	global.Logger = glog.New()
 
 	tokenMaker, err := token.NewJWTMaker(cfg.JwtCfg.SecretKey)
@@ -36,18 +44,27 @@ func main() {
 		_ = dbConn.Close()
 	}()
 
-	// Seed rich Vietnamese academic & AI confusion dataset
-	if err := postgres.SeedDatabase(global.DB); err != nil {
-		log.Printf("WARNING: SeedDatabase reported error: %v", err)
+	// Seed the Vietnamese demo dataset only in development or with explicit SEED_DEMO_DATA=true opt-in.
+	if seedEnabled {
+		if err := postgres.SeedDatabase(global.DB, seedPassword); err != nil {
+			log.Printf("WARNING: SeedDatabase reported error: %v", err)
+		}
+	} else {
+		log.Printf("Demo seed disabled (APP_ENV=%s); set SEED_DEMO_DATA=true and SEED_DEMO_PASSWORD to enable", cfg.ServerCfg.AppEnv)
 	}
 
 	// Initialize Redis (with in-memory fallback)
 	redis.InitRedis()
 	defer redis.CloseRedis()
 
-	// Warm up Multimodal Confusion Predictor (12 features -> MLP 64-32-16 + LR)
+	// Warm up the SP-BEF confusion predictor and apply the persisted admin settings (confusion_settings).
 	pred := service.GetConfusionPredictor()
 	log.Printf("ConfusionPredictor loaded (Ready=%v)", pred.IsReady())
+	if found, err := service.LoadConfusionSettings(context.Background(), global.DB, pred); err != nil {
+		log.Printf("WARNING: confusion settings: %v", err)
+	} else if found {
+		log.Printf("Confusion settings loaded from confusion_settings")
+	}
 
 	// Initialize pgqueue Publisher & Consumer
 	global.QueuePublisher = pgqueue.NewPublisher(global.DB)

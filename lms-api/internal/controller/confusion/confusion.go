@@ -123,6 +123,8 @@ func ValidatePredictConfusionReq(req *v1.PredictConfusionReq) error {
 		req.RBeh,
 		req.LLRQuiz,
 		req.RQuiz,
+		req.LLRGaze,
+		req.RGaze,
 		req.FacePresentRatio,
 		req.AvgLuminance,
 		req.HeadYawAbsDeg,
@@ -196,6 +198,9 @@ func ValidatePredictConfusionReq(req *v1.PredictConfusionReq) error {
 	if req.RQuiz < 0 || req.RQuiz > 1 {
 		return resCode.ValidationFailed.New("rQuiz must be in [0, 1]")
 	}
+	if req.RGaze < 0 || req.RGaze > 1 {
+		return resCode.ValidationFailed.New("rGaze must be in [0, 1]")
+	}
 	if req.FacePresentRatio < 0 || req.FacePresentRatio > 1 {
 		return resCode.ValidationFailed.New("facePresentRatio must be in [0, 1]")
 	}
@@ -233,7 +238,7 @@ func (c *ControllerV1) PredictConfusion(ctx context.Context, req *v1.PredictConf
 		return nil, err
 	}
 
-	confCfg := config.GetConfig().ConfusionCfg
+	confCfg := config.GetConfusionConfig()
 	var predictor *service.ConfusionPredictor
 	if c.svc != nil && c.svc.Predictor() != nil {
 		predictor = c.svc.Predictor()
@@ -243,8 +248,9 @@ func (c *ControllerV1) PredictConfusion(ctx context.Context, req *v1.PredictConf
 
 	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" {
-		userID := consts.CurrentUserID(ctx)
-		if userID > 0 || req.LessonID > 0 {
+		// Server-side HMM state is keyed per user; guests (userID 0) get a stateless evaluation instead of
+		// sharing one "0:<lesson>" session (previously every guest was silently user 3).
+		if userID := consts.CurrentUserID(ctx); userID > 0 {
 			sessionID = fmt.Sprintf("%d:%d", userID, req.LessonID)
 		}
 	}
@@ -266,6 +272,9 @@ func (c *ControllerV1) PredictConfusion(ctx context.Context, req *v1.PredictConf
 		DtSec:                req.DtSec,
 		HasFace:              hasFace,
 		HasQuiz:              hasQuiz,
+		HasGaze:              req.HasGaze || req.RGaze > 0,
+		LLRGaze:              req.LLRGaze,
+		RGaze:                req.RGaze,
 		RFace:                req.RFace,
 		RBeh:                 req.RBeh,
 		RQuiz:                req.RQuiz,
@@ -331,6 +340,9 @@ func (c *ControllerV1) PredictConfusion(ctx context.Context, req *v1.PredictConf
 		ContribFace:          eval.ContribFace,
 		ContribBeh:           eval.ContribBeh,
 		ContribQuiz:          eval.ContribQuiz,
+		LLRGaze:              eval.LLRGaze,
+		RGaze:                eval.RGaze,
+		ContribGaze:          eval.ContribGaze,
 		SegmentPrior:         eval.SegmentPrior,
 		HighDurationSec:      eval.HighDurationSec,
 		CooldownRemainingSec: eval.CooldownRemainingSec,
@@ -344,6 +356,9 @@ func (c *ControllerV1) PredictConfusion(ctx context.Context, req *v1.PredictConf
 
 func (c *ControllerV1) ExplainConfusion(ctx context.Context, req *v1.ExplainConfusionReq) (res *v1.ExplainConfusionRes, err error) {
 	userID := consts.CurrentUserID(ctx)
+	if userID == 0 {
+		return nil, resCode.TokenMissing.New("please provide authorization")
+	}
 	out, err := c.svc.Tutor().ExplainConfusion(ctx, service.ExplainConfusionInput{
 		UserID:          userID,
 		LessonID:        req.LessonID,
@@ -366,6 +381,9 @@ func (c *ControllerV1) ExplainConfusion(ctx context.Context, req *v1.ExplainConf
 
 func (c *ControllerV1) LogConfusionSession(ctx context.Context, req *v1.LogConfusionSessionReq) (res *v1.LogConfusionSessionRes, err error) {
 	userID := consts.CurrentUserID(ctx)
+	if userID == 0 {
+		return nil, resCode.TokenMissing.New("please provide authorization")
+	}
 	logEntry := entity.ConfusionLog{
 		UserID:              userID,
 		CourseID:            req.CourseID,
@@ -428,6 +446,94 @@ func (c *ControllerV1) LogConfusionSession(ctx context.Context, req *v1.LogConfu
 		Log:        &logEntry,
 		SelfReport: sr,
 	}, nil
+}
+
+// ValidateLogReadingGazeReq rejects NaN/Inf and out-of-range gaze features before they reach the training set.
+func ValidateLogReadingGazeReq(req *v1.LogReadingGazeReq) error {
+	if req == nil {
+		return resCode.ValidationFailed.New("request body is required")
+	}
+	if req.LessonID <= 0 {
+		return resCode.ValidationFailed.New("lessonId is required")
+	}
+	switch req.LabelSource {
+	case "designed_stimulus":
+		if req.StimulusType != "control" && req.StimulusType != "factual" && req.StimulusType != "contextual" {
+			return resCode.ValidationFailed.New("stimulusType must be control, factual or contextual for designed_stimulus")
+		}
+	case "self_report":
+		if req.SelfReportLevel < 1 || req.SelfReportLevel > 4 {
+			return resCode.ValidationFailed.New("selfReportLevel must be in [1, 4] for self_report")
+		}
+	default:
+		return resCode.ValidationFailed.New("labelSource must be designed_stimulus or self_report")
+	}
+	if req.ParagraphIndex < 0 || req.WordCount < 0 {
+		return resCode.ValidationFailed.New("paragraphIndex and wordCount must be >= 0")
+	}
+	if isInvalidFloat(req.LLRGaze) {
+		return resCode.ValidationFailed.New("float parameter cannot be NaN or Inf")
+	}
+	nonNegative := []float64{
+		req.DwellRatio, req.RereadCount, req.ParaRegressionRate, req.SweepRatio, req.GazeTransitionEntropy,
+		req.SaccadeRate, req.RGaze, req.CalibrationErrorNorm, req.TextDifficulty, req.ReadingWpm,
+		req.PosteriorProb, req.PromptProbability,
+	}
+	for _, v := range nonNegative {
+		if isInvalidFloat(v) {
+			return resCode.ValidationFailed.New("float parameter cannot be NaN or Inf")
+		}
+		if v < 0 {
+			return resCode.ValidationFailed.New("gaze features must be >= 0")
+		}
+	}
+	for _, v := range []float64{req.GazeTransitionEntropy, req.RGaze, req.TextDifficulty, req.PosteriorProb, req.PromptProbability} {
+		if v > 1 {
+			return resCode.ValidationFailed.New("entropy, rGaze, textDifficulty and probabilities must be in [0, 1]")
+		}
+	}
+	return nil
+}
+
+func (c *ControllerV1) LogReadingGaze(ctx context.Context, req *v1.LogReadingGazeReq) (res *v1.LogReadingGazeRes, err error) {
+	if err := ValidateLogReadingGazeReq(req); err != nil {
+		return nil, err
+	}
+	userID := consts.CurrentUserID(ctx)
+	if userID == 0 {
+		return nil, resCode.TokenMissing.New("please provide authorization")
+	}
+	sample := entity.ReadingGazeSample{
+		UserID:                userID,
+		CourseID:              req.CourseID,
+		LessonID:              req.LessonID,
+		ParagraphIndex:        req.ParagraphIndex,
+		LabelSource:           req.LabelSource,
+		StimulusType:          req.StimulusType,
+		SelfReportLevel:       req.SelfReportLevel,
+		PromptProbability:     req.PromptProbability,
+		DwellRatio:            req.DwellRatio,
+		RereadCount:           req.RereadCount,
+		ParaRegressionRate:    req.ParaRegressionRate,
+		SweepRatio:            req.SweepRatio,
+		GazeTransitionEntropy: req.GazeTransitionEntropy,
+		SaccadeRate:           req.SaccadeRate,
+		RGaze:                 req.RGaze,
+		LLRGaze:               clampLLR(req.LLRGaze),
+		CalibrationErrorNorm:  req.CalibrationErrorNorm,
+		TextDifficulty:        req.TextDifficulty,
+		WordCount:             req.WordCount,
+		ReadingWpm:            req.ReadingWpm,
+		PosteriorProb:         req.PosteriorProb,
+	}
+	if err := c.svc.DB().WithContext(ctx).Create(&sample).Error; err != nil {
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
+	return &v1.LogReadingGazeRes{ID: sample.ID}, nil
+}
+
+func clampLLR(x float64) float64 {
+	return math.Max(-service.SPBEFLLRClip, math.Min(service.SPBEFLLRClip, x))
 }
 
 func (c *ControllerV1) ResolveConfusionEpisode(ctx context.Context, req *v1.ResolveConfusionEpisodeReq) (res *v1.ResolveConfusionEpisodeRes, err error) {

@@ -31,7 +31,9 @@ func (c *ControllerV1) GetCourseRoadmap(ctx context.Context, req *v1.GetCourseRo
 	}
 
 	var prog []entity.UserRoadmapProgress
-	c.svc.DB().WithContext(ctx).Where("user_id = ? AND roadmap_id = ?", userID, rm.ID).Find(&prog)
+	if userID > 0 { // guests (public route) have no personal progress
+		c.svc.DB().WithContext(ctx).Where("user_id = ? AND roadmap_id = ?", userID, rm.ID).Find(&prog)
+	}
 
 	return &v1.GetCourseRoadmapRes{
 		Roadmap:      &rm,

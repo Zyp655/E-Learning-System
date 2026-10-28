@@ -1,4 +1,5 @@
 import api from '../utils/api';
+import { isHttpError } from '../utils/httpError';
 import { mockStore } from '../utils/mockData';
 
 const ROLE_LABELS = {
@@ -72,18 +73,55 @@ export const normalizeUser = (u = {}) => {
   };
 };
 
+// First present value as a number, or null when lms-api did not send the field (rendered as '-', never as
+// an invented number).
+const firstNumber = (...values) => {
+  const v = values.find((x) => x !== undefined && x !== null && x !== '');
+  if (v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const firstText = (...values) => values.find((x) => typeof x === 'string' && x.trim() !== '') || '';
+
 export const normalizeProctoringViolation = (v = {}) => {
-  const studentName = v.student_name || v.studentName || v.full_name || v.fullName || 'Sinh viên';
-  const studentCode = v.student_code || v.studentCode || 'SV20220000';
-  const courseTitle = v.course_title || v.courseTitle || 'Học sâu và Thị giác Máy tính';
-  const lessonTitle = v.lesson_title || v.lessonTitle || 'Bài giảng Video';
-  const videoTimestampSec = Number(v.video_timestamp_sec ?? v.videoTimestampSec ?? 0);
-  const violationType = v.violation_type || v.violationType || 'face_absent_30s';
-  const cosineSimilarity = Number(v.cosine_similarity ?? v.cosineSimilarity ?? 0);
-  const thresholdRequired = Number(v.threshold_required ?? v.thresholdRequired ?? 0.55);
-  const absentDurationSec = Number(v.absent_duration_sec ?? v.absentDurationSec ?? 30);
-  const consecutiveFails = Number(v.consecutive_fails ?? v.consecutiveFails ?? 6);
-  const createdAt = v.created_at || v.createdAt || '2026-10-23 09:00:00';
+  // Accepts both the mock shape and lms-api AdminProctoringViolationView (userName/user_name,
+  // videoTimestamp/video_timestamp, similarityScore/similarity_score, durationSeconds/duration_seconds).
+  // lms-api never sends threshold_required / consecutive_fails, and may send empty student code, course or
+  // lesson titles: those stay null / '' so the page shows '-'.
+  const studentName = firstText(
+    v.student_name,
+    v.studentName,
+    v.user_name,
+    v.userName,
+    v.full_name,
+    v.fullName,
+    v.user?.fullName
+  );
+  const studentCode = firstText(v.student_code, v.studentCode, v.user?.studentCode);
+  const courseTitle = firstText(v.course_title, v.courseTitle);
+  const lessonTitle = firstText(v.lesson_title, v.lessonTitle);
+  const videoTimestampSec = firstNumber(
+    v.video_timestamp_sec,
+    v.videoTimestampSec,
+    v.video_timestamp,
+    v.videoTimestamp
+  );
+  const violationType = v.violation_type || v.violationType || '';
+  const cosineSimilarity = firstNumber(
+    v.cosine_similarity,
+    v.cosineSimilarity,
+    v.similarity_score,
+    v.similarityScore
+  );
+  const thresholdRequired = firstNumber(v.threshold_required, v.thresholdRequired);
+  const absentDurationSec = firstNumber(
+    v.absent_duration_sec,
+    v.absentDurationSec,
+    v.duration_seconds,
+    v.durationSeconds
+  );
+  const consecutiveFails = firstNumber(v.consecutive_fails, v.consecutiveFails);
+  const createdAt = v.created_at || v.createdAt || null;
 
   return {
     ...v,
@@ -118,17 +156,26 @@ export const normalizeProctoringViolation = (v = {}) => {
   };
 };
 
+// lms-api AdminSubmissionIntegrityView.integrityStatus (from the stored similarity report) -> page status.
+const INTEGRITY_STATUS_FROM_BACKEND = { flagged: 'flagged', warning: 'pending_review', clean: 'clean' };
+
 export const normalizeIntegrityAlert = (a = {}) => {
-  const studentName = a.student_name || a.studentName || 'Sinh viên';
-  const studentCode = a.student_code || a.studentCode || 'SV20220000';
-  const courseTitle = a.course_title || a.courseTitle || 'Khóa học';
-  const assignmentTitle = a.assignment_title || a.assignmentTitle || 'Bài tập';
-  const honorCodeAccepted = Boolean(a.honor_code_accepted ?? a.honorCodeAccepted ?? true);
-  const similarityScore = Number(a.similarity_score ?? a.similarityScore ?? 0);
-  const matchedSource = a.matched_source || a.matchedSource || '';
-  const aiGradeScore = Number(a.ai_grade_score ?? a.aiGradeScore ?? 0);
-  const aiGradeConfidence = Number(a.ai_grade_confidence ?? a.aiGradeConfidence ?? 0.9);
-  const submittedAt = a.submitted_at || a.submittedAt || '2026-10-22 20:00:00';
+  // Accepts the mock shape and lms-api AdminSubmissionIntegrityView (studentName, assignmentTitle,
+  // similarityScore %, integrityStatus, analysisSummary, aiGradeScore/aiGradeConfidence null until graded).
+  const fromBackend = a.integrityStatus !== undefined || a.submissionStatus !== undefined;
+  const studentName = firstText(a.student_name, a.studentName);
+  const studentCode = firstText(a.student_code, a.studentCode);
+  const courseTitle = firstText(a.course_title, a.courseTitle);
+  const assignmentTitle = firstText(a.assignment_title, a.assignmentTitle);
+  const honorCodeAccepted = Boolean(a.honor_code_accepted ?? a.honorCodeAccepted ?? false);
+  const similarityScore = firstNumber(a.similarity_score, a.similarityScore);
+  const matchedSource = firstText(a.matched_source, a.matchedSource, a.analysisSummary);
+  const aiGradeScore = firstNumber(a.ai_grade_score, a.aiGradeScore);
+  const aiGradeConfidence = firstNumber(a.ai_grade_confidence, a.aiGradeConfidence);
+  const submittedAt = a.submitted_at || a.submittedAt || null;
+  const status = fromBackend
+    ? INTEGRITY_STATUS_FROM_BACKEND[a.integrityStatus] || 'unchecked'
+    : a.status || 'pending_review';
 
   return {
     ...a,
@@ -153,7 +200,9 @@ export const normalizeIntegrityAlert = (a = {}) => {
     aiGradeScore,
     ai_grade_confidence: aiGradeConfidence,
     aiGradeConfidence,
-    status: a.status || 'pending_review',
+    status,
+    // lms-api stores no integrity review decision, so verify/reject is only available for demo data.
+    review_supported: !fromBackend,
     submitted_at: submittedAt,
     submittedAt,
   };
@@ -280,17 +329,17 @@ class UsersApi {
     return { id, is_banned: isBanned, isBanned };
   };
 
+  // lms-api DELETE /v1/admin/users/:id/face. (DELETE /v1/student/face must NOT be called here: it deletes
+  // the face data of the caller, i.e. the admin's own embeddings, and ignores any user id.)
   resetFaceEmbedding = async (userId) => {
     try {
-      await Promise.allSettled([
-        api.delete(`/v1/admin/users/${userId}/face`),
-        api.delete('/v1/student/face', {
-          data: { user_id: userId, userId },
-          params: { user_id: userId, userId },
-        }),
-      ]);
-    } catch (error) {}
+      await api.delete(`/v1/admin/users/${userId}/face`);
+      return { user_id: userId, userId, reset: true };
+    } catch (error) {
+      if (isHttpError(error)) throw error;
+    }
 
+    // Offline demo mode only.
     mockStore.users = mockStore.users.map((u) =>
       u.id === userId
         ? normalizeUser({
@@ -316,21 +365,31 @@ class UsersApi {
   };
 
   getProctoringViolations = async (params = {}) => {
+    let list;
     try {
-      const res = await api.get('/v1/admin/proctoring/violations', { params });
-      const items = res?.data?.data?.items || res?.data?.data || res?.data;
-      if (Array.isArray(items) && items.length > 0) {
-        return items.map(normalizeProctoringViolation);
+      // Must match lms-api ListAdminProctoringViolationsReq (path:"/admin/proctoring-violations"), which
+      // reads the type filter from ?violationType=.
+      const query = {};
+      if (params.status) query.status = params.status;
+      if (params.violation_type) query.violationType = params.violation_type;
+      const res = await api.get('/v1/admin/proctoring-violations', { params: query });
+      const body = res?.data?.data ?? res?.data;
+      // lms-api serializes an empty result as items: null; that means "no violations", not "use mock data".
+      const items = Array.isArray(body) ? body : body?.items ?? body?.violations ?? [];
+      list = (Array.isArray(items) ? items : []).map(normalizeProctoringViolation);
+    } catch (error) {
+      // Only fall back to demo data when lms-api is unreachable (no HTTP response). HTTP errors such as
+      // 401/403/500 are real failures and must surface to the page instead of showing invented violations.
+      if (isHttpError(error)) throw error;
+      list = (mockStore.proctoringViolations || []).map(normalizeProctoringViolation);
+      if (params.violation_type) {
+        list = list.filter((v) => v.violation_type === params.violation_type);
       }
-    } catch (error) {}
+      if (params.status) {
+        list = list.filter((v) => v.status === params.status);
+      }
+    }
 
-    let list = (mockStore.proctoringViolations || []).map(normalizeProctoringViolation);
-    if (params.violation_type) {
-      list = list.filter((v) => v.violation_type === params.violation_type);
-    }
-    if (params.status) {
-      list = list.filter((v) => v.status === params.status);
-    }
     if (params.keyword) {
       const kw = String(params.keyword).toLowerCase();
       list = list.filter(
@@ -345,12 +404,20 @@ class UsersApi {
 
   resolveProctoringViolation = async (violationId, { status, adminNote }) => {
     try {
-      await api.put(`/v1/admin/proctoring/violations/${violationId}`, {
+      const res = await api.put(`/v1/admin/proctoring-violations/${violationId}`, {
         status,
         admin_note: adminNote,
         adminNote,
       });
-    } catch (error) {}
+      const updated = res?.data?.data?.violation;
+      if (updated && updated.id !== undefined) {
+        return normalizeProctoringViolation(updated);
+      }
+    } catch (error) {
+      // A rejection from lms-api (e.g. 401/403/404) means the violation was NOT updated; do not report
+      // success. Only the offline demo mode (no HTTP response) updates the local mock store.
+      if (isHttpError(error)) throw error;
+    }
 
     mockStore.proctoringViolations = (mockStore.proctoringViolations || []).map((v) =>
       v.id === violationId
@@ -364,16 +431,21 @@ class UsersApi {
     return mockStore.proctoringViolations.find((v) => v.id === violationId);
   };
 
+  // lms-api GET /v1/admin/proctoring/submissions -> { items: AdminSubmissionIntegrityView[], total }:
+  // submissions with similarity >= 25 % or without an accepted honor code. Read-only on the backend.
   getSubmissionIntegrityAlerts = async (params = {}) => {
+    let list;
     try {
-      const res = await api.get('/v1/admin/proctoring/submissions', { params });
-      const items = res?.data?.data?.items || res?.data?.data || res?.data;
-      if (Array.isArray(items) && items.length > 0) {
-        return items.map(normalizeIntegrityAlert);
-      }
-    } catch (error) {}
+      const res = await api.get('/v1/admin/proctoring/submissions');
+      const body = res?.data?.data ?? res?.data;
+      const items = Array.isArray(body) ? body : body?.items ?? [];
+      list = (Array.isArray(items) ? items : []).map(normalizeIntegrityAlert);
+    } catch (error) {
+      if (isHttpError(error)) throw error;
+      // Offline demo mode only.
+      list = (mockStore.submissionIntegrityAlerts || []).map(normalizeIntegrityAlert);
+    }
 
-    let list = (mockStore.submissionIntegrityAlerts || []).map(normalizeIntegrityAlert);
     if (params.status) {
       list = list.filter((a) => a.status === params.status);
     }
@@ -389,11 +461,13 @@ class UsersApi {
     return list;
   };
 
+  // lms-api has no endpoint to store an integrity review decision (no integrity status column on
+  // submissions), so this only works for the offline demo data and never calls the backend.
   updateSubmissionIntegrityStatus = async (alertId, status) => {
-    try {
-      await api.put(`/v1/admin/proctoring/submissions/${alertId}`, { status });
-    } catch (error) {}
-
+    const exists = (mockStore.submissionIntegrityAlerts || []).some((a) => a.id === alertId);
+    if (!exists) {
+      throw new Error('lms-api chưa hỗ trợ lưu kết luận hậu kiểm bài nộp');
+    }
     mockStore.submissionIntegrityAlerts = (mockStore.submissionIntegrityAlerts || []).map((a) =>
       a.id === alertId ? normalizeIntegrityAlert({ ...a, status }) : a
     );

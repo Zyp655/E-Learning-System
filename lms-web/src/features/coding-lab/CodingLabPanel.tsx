@@ -6,18 +6,26 @@ import {
   Badge,
   Button,
   Card,
+  FieldError,
   Textarea,
   chipVariants,
   formClass,
 } from '@/app/[locale]/(HOME_CATEGORY)/_components/ui';
-import { lmsApi } from '@/api';
+import {
+  CODING_LAB_NOT_GRADABLE_MESSAGE,
+  backendCodingProblemId,
+  codingLanguagesFor,
+  describeApiError,
+  lmsApi,
+} from '@/api';
 import { MOCK_CODING_CHALLENGES } from '@/api/mockData';
-import type { CodingChallengeItem, CodingTestCaseResult } from '@/api/types';
+import type { CodingChallengeItem, CodingLanguage, CodingTestCaseResult } from '@/api/types';
 
 interface CodingLabPanelProps {
   initialChallengeId?: number;
   onAskAiTutor?: (prompt: string) => void;
-  onLabCompleted?: (score: number, similarityScore: number) => void;
+  /** similarityScore is null while lms-api does not run an originality check. */
+  onLabCompleted?: (score: number, similarityScore: number | null) => void;
 }
 
 export function CodingLabPanel({
@@ -28,8 +36,13 @@ export function CodingLabPanel({
   const [selectedChallengeId, setSelectedChallengeId] = useState<number>(initialChallengeId);
   const challenge: CodingChallengeItem =
     MOCK_CODING_CHALLENGES.find((c) => c.id === selectedChallengeId) || MOCK_CODING_CHALLENGES[0];
+  // Only challenges backed by an lms-api CodingProblem can be run or submitted.
+  const gradable = backendCodingProblemId(challenge.id) !== null;
+  // A graded challenge only offers its backend problem's language: the grader does not check any other.
+  const languages = codingLanguagesFor(challenge);
 
-  const [language, setLanguage] = useState<'python' | 'typescript' | 'go'>('python');
+  const [selectedLanguage, setLanguage] = useState<CodingLanguage>('python');
+  const language: CodingLanguage = languages.includes(selectedLanguage) ? selectedLanguage : languages[0];
   const [code, setCode] = useState<string>(challenge.starterCode.python);
   const [honorCodeChecked, setHonorCodeChecked] = useState(true);
   const [honorCodeError, setHonorCodeError] = useState<string | null>(null);
@@ -41,6 +54,7 @@ export function CodingLabPanel({
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [submissionScore, setSubmissionScore] = useState<number | null>(null);
   const [similarityScore, setSimilarityScore] = useState<number | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedChallengeId(initialChallengeId);
@@ -49,25 +63,32 @@ export function CodingLabPanel({
   useEffect(() => {
     const ch =
       MOCK_CODING_CHALLENGES.find((c) => c.id === selectedChallengeId) || MOCK_CODING_CHALLENGES[0];
-    setCode(ch.starterCode[language]);
+    setCode(ch.starterCode[language] ?? ch.starterCode.python);
     setTestResults([]);
     setAiFeedback(null);
     setSubmissionScore(null);
     setSimilarityScore(null);
+    setRequestError(null);
     setShowAiHint(false);
   }, [selectedChallengeId, language]);
 
   const handleRunPublicTests = async () => {
     setRunning(true);
     setHonorCodeError(null);
-    const res = await lmsApi.runCodingPublicTests({
-      challengeId: challenge.id,
-      language,
-      code,
-    });
-    setTestResults(res.results);
-    setAiFeedback(res.aiFeedback);
-    setRunning(false);
+    setRequestError(null);
+    try {
+      const res = await lmsApi.runCodingPublicTests({
+        challengeId: challenge.id,
+        language,
+        code,
+      });
+      setTestResults(res.results);
+      setAiFeedback(res.aiFeedback);
+    } catch (err) {
+      setRequestError(`Không chạy được Test Cases: ${describeApiError(err)}`);
+    } finally {
+      setRunning(false);
+    }
   };
 
   const handleSubmitAllTests = async () => {
@@ -78,21 +99,27 @@ export function CodingLabPanel({
       return;
     }
     setHonorCodeError(null);
+    setRequestError(null);
     setSubmitting(true);
-    const res = await lmsApi.submitCodingAllTests({
-      challengeId: challenge.id,
-      language,
-      code,
-      honorCodeAccepted: honorCodeChecked,
-    });
-    setTestResults(res.results);
-    setAiFeedback(res.aiFeedback);
-    setSubmissionScore(res.score);
-    setSimilarityScore(res.similarityScore);
-    setSubmitting(false);
+    try {
+      const res = await lmsApi.submitCodingAllTests({
+        challengeId: challenge.id,
+        language,
+        code,
+        honorCodeAccepted: honorCodeChecked,
+      });
+      setTestResults(res.results);
+      setAiFeedback(res.aiFeedback);
+      setSubmissionScore(res.score);
+      setSimilarityScore(res.similarityScore);
 
-    if (res.score >= 75 && onLabCompleted) {
-      onLabCompleted(res.score, res.similarityScore);
+      if (res.score >= 75 && onLabCompleted) {
+        onLabCompleted(res.score, res.similarityScore);
+      }
+    } catch (err) {
+      setRequestError(`Bài nộp chưa được chấm: ${describeApiError(err)}`);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -140,7 +167,7 @@ export function CodingLabPanel({
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          {MOCK_CODING_CHALLENGES.map((item) => (
+          {MOCK_CODING_CHALLENGES.filter((item) => item.courseId === challenge.courseId).map((item) => (
             <button
               key={item.id}
               type="button"
@@ -221,7 +248,7 @@ export function CodingLabPanel({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-medium text-secondary">Ngôn ngữ:</span>
-              {(['python', 'typescript', 'go'] as const).map((lang) => (
+              {languages.map((lang) => (
                 <button
                   key={lang}
                   type="button"
@@ -240,7 +267,7 @@ export function CodingLabPanel({
             <Button
               size="xs"
               variant="ghost"
-              onClick={() => setCode(challenge.starterCode[language])}
+              onClick={() => setCode(challenge.starterCode[language] ?? challenge.starterCode.python)}
             >
               <Icon name="arrowPath" size="xs" />
               Khôi phục Code mẫu
@@ -277,12 +304,18 @@ export function CodingLabPanel({
           {honorCodeError && (
             <p className="text-xs font-medium text-danger">{honorCodeError}</p>
           )}
+          <FieldError>{requestError}</FieldError>
+          {!gradable && (
+            <p className="text-xs font-medium text-secondary" role="status">
+              {CODING_LAB_NOT_GRADABLE_MESSAGE}
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center justify-end gap-2.5">
             <Button
               size="sm"
               variant="outline"
-              disabled={running || submitting}
+              disabled={!gradable || running || submitting}
               onClick={handleRunPublicTests}
             >
               <Icon name="play" size="sm" />
@@ -291,7 +324,7 @@ export function CodingLabPanel({
             <Button
               size="sm"
               variant="primary"
-              disabled={running || submitting}
+              disabled={!gradable || running || submitting}
               onClick={handleSubmitAllTests}
             >
               <Icon name="checkCircle" size="sm" />
@@ -307,7 +340,7 @@ export function CodingLabPanel({
           <div className="flex items-center gap-2">
             <Icon name="terminal" size="sm" className="text-chat" />
             <h4 className="text-sm font-semibold text-primary">
-              Bảng Kết quả Chạy Kiểm thử Tự động (Test Cases #1..#4)
+              Bảng Kết quả Chạy Kiểm thử Tự động ({challenge.testCases.length} Test Cases)
             </h4>
           </div>
           {testResults.length > 0 && (
@@ -376,7 +409,7 @@ export function CodingLabPanel({
               </span>
               {similarityScore !== null && (
                 <Badge tone={similarityScore <= 25 ? 'success' : 'danger'}>
-                  Originality Check: Độ trùng lặp {similarityScore}% — Hợp lệ
+                  Originality Check: Độ trùng lặp {similarityScore}% — {similarityScore <= 25 ? 'Hợp lệ' : 'Cảnh báo'}
                 </Badge>
               )}
             </div>

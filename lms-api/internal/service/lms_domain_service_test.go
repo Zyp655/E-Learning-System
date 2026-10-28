@@ -7,6 +7,7 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/hieu/lms-confusion/lms-api/global"
+	"github.com/hieu/lms-confusion/lms-api/internal/config"
 	"github.com/hieu/lms-confusion/lms-api/internal/entity"
 	"github.com/hieu/lms-confusion/lms-api/internal/pgqueue"
 	"github.com/hieu/lms-confusion/lms-api/internal/storage/postgres"
@@ -27,7 +28,7 @@ func TestLMSDomainService_EndToEnd(t *testing.T) {
 		t.Fatalf("AutoMigrate failed: %v", err)
 	}
 
-	if err := postgres.SeedDatabase(db); err != nil {
+	if err := postgres.SeedDatabase(db, config.DevSeedPassword); err != nil {
 		t.Fatalf("SeedDatabase failed: %v", err)
 	}
 
@@ -203,4 +204,3 @@ func TestLMSDomainService_EndToEnd(t *testing.T) {
 		t.Fatalf("expected completed reading lesson with next navigation, got %+v", compRes)
 	}
 }
-

@@ -5,7 +5,6 @@ import {
   Form,
   InputNumber,
   Slider,
-  Select,
   Button,
   Alert,
   Space,
@@ -27,9 +26,25 @@ import {
   BarChartOutlined,
 } from '@ant-design/icons';
 import PageTitle from '../../components/PageTitle';
-import confusionApi from '../../api/confusion';
+import confusionApi, { SP_BEF_FIELDS, LEGACY_FIELDS } from '../../api/confusion';
+import { showApiError } from '../../utils/api';
 
 const { Title, Text } = Typography;
+
+// Editable fields; names map to lms-api camelCase via SP_BEF_FIELDS / LEGACY_FIELDS (api/confusion.js).
+const FORM_FIELDS = [
+  'theta_on',
+  'theta_off',
+  'min_hold_sec',
+  'w_face',
+  'w_beh',
+  'w_quiz',
+  'hmm_keep_confused',
+  'cooldown_seconds',
+  'face_similarity_threshold',
+  'max_absent_checks',
+];
+const FIELD_CAMEL = { ...SP_BEF_FIELDS, ...LEGACY_FIELDS };
 
 const LLR_DISTRIBUTION_DATA = [
   {
@@ -79,29 +94,28 @@ export default function AiSettings() {
   const [lastOperationResult, setLastOperationResult] = useState(null);
   const [settingsMeta, setSettingsMeta] = useState(null);
 
+  const applySettingsToForm = useCallback(
+    (data) => {
+      setSettingsMeta(data);
+      const values = {};
+      FORM_FIELDS.forEach((name) => {
+        values[name] = data[name] ?? undefined;
+      });
+      form.setFieldsValue(values);
+    },
+    [form]
+  );
+
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await confusionApi.getSettings();
-      setSettingsMeta(data);
-      form.setFieldsValue({
-        theta_on: data.theta_on ?? data.ml_threshold ?? 0.62,
-        theta_off: data.theta_off ?? 0.42,
-        min_hold_sec: data.min_hold_sec ?? 10,
-        cooldown_seconds: data.cooldown_seconds ?? 180,
-        w_face: data.w_face ?? 0.65,
-        w_beh: data.w_beh ?? 0.85,
-        w_quiz: data.w_quiz ?? 0.90,
-        hmm_keep_confused: data.hmm_keep_confused ?? 0.78,
-        face_similarity_threshold: data.face_similarity_threshold ?? 0.55,
-        max_absent_checks: data.max_absent_checks ?? 6,
-        active_predictor: data.active_predictor || 'sp_bef_v2_bayesian_hmm',
-        llm_vision_model: data.llm_vision_model || 'gpt-4o-mini',
-      });
+      applySettingsToForm(await confusionApi.getSettings());
+    } catch (error) {
+      showApiError(error, 'Không tải được cấu hình SP-BEF từ lms-api');
     } finally {
       setLoading(false);
     }
-  }, [form]);
+  }, [applySettingsToForm]);
 
   useEffect(() => {
     fetchSettings();
@@ -110,15 +124,21 @@ export default function AiSettings() {
   const handleSaveSettings = async (values) => {
     setSaving(true);
     try {
-      const payload = {
-        ...values,
-        ml_threshold: values.theta_on,
-      };
+      // Only fields lms-api accepts (UpdateConfusionSettingsReq); mlThreshold is legacy and not sent.
+      const payload = {};
+      FORM_FIELDS.forEach((name) => {
+        payload[name] = values[name];
+      });
       const updated = await confusionApi.updateSettings(payload);
-      setSettingsMeta(updated);
-      message.success(
-        'Đã lưu cấu hình SP-BEF (θ_on, θ_off, w_m, Cooldown) và đồng bộ tới Redis / Go Backend!'
-      );
+      applySettingsToForm(updated);
+      if (updated.source === 'demo') {
+        message.warning('Chế độ demo ngoại tuyến: cấu hình chỉ lưu trong trình duyệt, chưa gửi tới lms-api.');
+      } else {
+        message.success('Đã lưu cấu hình SP-BEF vào lms-api (confusion_settings) và áp dụng cho bộ dự đoán.');
+      }
+    } catch (error) {
+      // 400 / code 40001: the message names the invalid field (e.g. thetaOff must be < thetaOn).
+      showApiError(error, 'lms-api từ chối cấu hình, chưa lưu thay đổi');
     } finally {
       setSaving(false);
     }
@@ -129,11 +149,14 @@ export default function AiSettings() {
     try {
       const res = await confusionApi.generateEmbeddings();
       setLastOperationResult({
-        type: 'embeddings',
-        title: 'Đồng bộ Vector Nhúng pgvector (POST /v1/admin/generate-embeddings) Thành công',
-        details: `Model: ${res.model} · Đã lập chỉ mục ${res.courses_indexed} khóa học, ${res.lessons_indexed} bài giảng và ${res.video_segments_indexed} phân đoạn VideoSegments trong ${res.elapsed_ms}ms.`,
+        type: res.source === 'demo' ? 'warning' : 'success',
+        title: 'POST /v1/admin/generate-embeddings',
+        details: `${res.message || ''}${
+          res.updatedCount !== undefined ? ` (cập nhật ${res.updatedCount} bản ghi)` : ''
+        }`,
       });
-      message.success('Đã tạo lại toàn bộ vector nhúng pgvector 1536 chiều!');
+    } catch (error) {
+      showApiError(error, 'Không tạo được vector nhúng');
     } finally {
       setEmbeddingLoading(false);
     }
@@ -144,15 +167,40 @@ export default function AiSettings() {
     try {
       const res = await confusionApi.seedDemoData();
       setLastOperationResult({
-        type: 'seed',
-        title: 'Khởi tạo Dữ liệu Mẫu Toàn Hệ thống (POST /v1/admin/seed-data) Thành công',
-        details: `Đã nạp dữ liệu chuẩn cho ${res.tables_populated} bảng PostgreSQL (${res.departments} khoa, ${res.users} người dùng, ${res.courses} khóa học, ${res.confusion_episodes} phiên bối rối).`,
+        type: res.source === 'demo' || res.success === false ? 'warning' : 'success',
+        title: 'POST /v1/admin/seed-data',
+        details: res.message || '',
       });
-      message.success('Đã nạp dữ liệu mẫu chuẩn cho toàn bộ hệ thống!');
+    } catch (error) {
+      // lms-api returns 403 outside APP_ENV dev/test.
+      showApiError(error, 'lms-api từ chối nạp dữ liệu mẫu');
     } finally {
       setSeedLoading(false);
     }
   };
+
+  const legacyFields = settingsMeta?.legacyFields || [];
+  const spBefDefaults = settingsMeta?.spBefDefaults || {};
+  const isLegacy = (snakeName) => legacyFields.includes(FIELD_CAMEL[snakeName]);
+  const defaultHint = (snakeName) => {
+    const v = spBefDefaults[FIELD_CAMEL[snakeName]];
+    return v === undefined ? '' : ` Mặc định (sp_bef_params.json): ${v}.`;
+  };
+  const isOverridden = (snakeName) =>
+    settingsMeta?.spBefOverrides?.[FIELD_CAMEL[snakeName]] !== undefined;
+  const legacyTag = (snakeName) =>
+    isLegacy(snakeName) ? (
+      <Tag color="default" style={{ marginLeft: 6 }}>
+        legacy: lms-api lưu nhưng không dùng
+      </Tag>
+    ) : null;
+  const overrideTag = (snakeName) =>
+    isOverridden(snakeName) ? (
+      <Tag color="orange" style={{ marginLeft: 6 }}>
+        đã ghi đè
+      </Tag>
+    ) : null;
+  const fmt = (v) => (v === undefined || v === null ? '-' : v);
 
   const llrColumns = [
     {
@@ -222,9 +270,19 @@ export default function AiSettings() {
         }
       />
 
+      {settingsMeta?.source === 'demo' && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="Chế độ demo ngoại tuyến: không kết nối được lms-api"
+          description="Giá trị bên dưới là dữ liệu mẫu trong trình duyệt; thay đổi sẽ không được gửi tới máy chủ."
+        />
+      )}
+
       {lastOperationResult && (
         <Alert
-          type="success"
+          type={lastOperationResult.type === 'warning' ? 'warning' : 'success'}
           showIcon
           closable
           onClose={() => setLastOperationResult(null)}
@@ -246,56 +304,50 @@ export default function AiSettings() {
               <code>LLR_m = clip(logit(Calib(p_m)) - logit(b_m), -4, 4)</code>
             </Text>
 
-            <Form
-              form={form}
-              layout="vertical"
-              onFinish={handleSaveSettings}
-              initialValues={{
-                theta_on: 0.62,
-                theta_off: 0.42,
-                min_hold_sec: 10,
-                cooldown_seconds: 180,
-                w_face: 0.65,
-                w_beh: 0.85,
-                w_quiz: 0.90,
-                hmm_keep_confused: 0.78,
-                face_similarity_threshold: 0.55,
-                max_absent_checks: 6,
-                active_predictor: 'sp_bef_v2_bayesian_hmm',
-                llm_vision_model: 'gpt-4o-mini',
-              }}
-            >
+            <Form form={form} layout="vertical" onFinish={handleSaveSettings}>
               <Row gutter={16}>
                 <Col md={8} xs={24}>
                   <Form.Item
                     name="theta_on"
-                    label="Ngưỡng Bật Can thiệp (θ_on — Mặc định: 0.62)"
-                    extra="Bật trạng thái bối rối khi P(t) ≥ θ_on liên tục trong ≥ T giây."
-                    rules={[{ required: true }]}
+                    label={<span>Ngưỡng Bật Can thiệp (θ_on → thetaOn){overrideTag('theta_on')}</span>}
+                    extra={`Bật trạng thái bối rối khi P(t) ≥ θ_on liên tục trong ≥ T giây. Khoảng hợp lệ: θ_off < θ_on < 1.${defaultHint('theta_on')}`}
+                    rules={[{ required: true, message: 'Nhập θ_on' }]}
                   >
-                    <InputNumber min={0.45} max={0.90} step={0.02} style={{ width: '100%' }} />
+                    <InputNumber min={0.01} max={0.99} step={0.01} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
 
                 <Col md={8} xs={24}>
                   <Form.Item
                     name="theta_off"
-                    label="Ngưỡng Tắt Hysteresis (θ_off — Mặc định: 0.42)"
-                    extra="Hạ cờ bối rối khi P(t) < θ_off (θ_off < θ_on chống dao động)."
-                    rules={[{ required: true }]}
+                    label={<span>Ngưỡng Tắt Hysteresis (θ_off → thetaOff){overrideTag('theta_off')}</span>}
+                    extra={`Hạ cờ bối rối khi P(t) < θ_off (0 < θ_off < θ_on).${defaultHint('theta_off')}`}
+                    dependencies={['theta_on']}
+                    rules={[
+                      { required: true, message: 'Nhập θ_off' },
+                      ({ getFieldValue }) => ({
+                        validator(_, value) {
+                          const on = getFieldValue('theta_on');
+                          if (value === undefined || value === null || on === undefined || on === null || value < on) {
+                            return Promise.resolve();
+                          }
+                          return Promise.reject(new Error('θ_off phải nhỏ hơn θ_on'));
+                        },
+                      }),
+                    ]}
                   >
-                    <InputNumber min={0.20} max={0.60} step={0.02} style={{ width: '100%' }} />
+                    <InputNumber min={0.01} max={0.99} step={0.01} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
 
                 <Col md={8} xs={24}>
                   <Form.Item
                     name="min_hold_sec"
-                    label="Thời gian Duy trì Tối thiểu (T giây — Mặc định: 10s)"
-                    extra="Số giây P(t) ≥ θ_on trước khi kích hoạt AI Tutor."
-                    rules={[{ required: true }]}
+                    label={<span>Thời gian Duy trì Tối thiểu (T giây → minHoldSec){overrideTag('min_hold_sec')}</span>}
+                    extra={`Số giây P(t) ≥ θ_on trước khi kích hoạt AI Tutor (> 0).${defaultHint('min_hold_sec')}`}
+                    rules={[{ required: true, message: 'Nhập T' }]}
                   >
-                    <InputNumber min={5} max={30} step={5} style={{ width: '100%' }} />
+                    <InputNumber min={0.5} max={600} step={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -304,33 +356,33 @@ export default function AiSettings() {
                 <Col md={8} xs={24}>
                   <Form.Item
                     name="w_face"
-                    label="Trọng số Nhánh Face (w_face — Mặc định: 0.65)"
-                    extra="Nhân với r_face(t) · LLR_face(t) (DAiSEE + Personal Baseline C2)."
-                    rules={[{ required: true }]}
+                    label={<span>Trọng số Nhánh Face (w_face → wFace){overrideTag('w_face')}</span>}
+                    extra={`Nhân với r_face(t) · LLR_face(t). 0 = tắt nhánh.${defaultHint('w_face')}`}
+                    rules={[{ required: true, message: 'Nhập w_face' }]}
                   >
-                    <InputNumber min={0.1} max={1.5} step={0.05} style={{ width: '100%' }} />
+                    <InputNumber min={0} max={3} step={0.05} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
 
                 <Col md={8} xs={24}>
                   <Form.Item
                     name="w_beh"
-                    label="Trọng số Nhánh Behavior (w_beh — Mặc định: 0.85)"
-                    extra="Nhân với r_beh(t) · LLR_beh(t) (MOOCCubeX 300s window)."
-                    rules={[{ required: true }]}
+                    label={<span>Trọng số Nhánh Behavior (w_beh → wBeh){overrideTag('w_beh')}</span>}
+                    extra={`Nhân với r_beh(t) · LLR_beh(t). 0 = tắt nhánh.${defaultHint('w_beh')}`}
+                    rules={[{ required: true, message: 'Nhập w_beh' }]}
                   >
-                    <InputNumber min={0.1} max={1.5} step={0.05} style={{ width: '100%' }} />
+                    <InputNumber min={0} max={3} step={0.05} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
 
                 <Col md={8} xs={24}>
                   <Form.Item
                     name="w_quiz"
-                    label="Trọng số Nhánh Quiz (w_quiz — Mặc định: 0.90)"
-                    extra="Nhân với r_quiz(t) · LLR_quiz(t) (ASSISTments In-Video Quiz)."
-                    rules={[{ required: true }]}
+                    label={<span>Trọng số Nhánh Quiz (w_quiz → wQuiz){overrideTag('w_quiz')}</span>}
+                    extra={`Nhân với r_quiz(t) · LLR_quiz(t). Không được tắt cả 3 nhánh.${defaultHint('w_quiz')}`}
+                    rules={[{ required: true, message: 'Nhập w_quiz' }]}
                   >
-                    <InputNumber min={0.1} max={1.5} step={0.05} style={{ width: '100%' }} />
+                    <InputNumber min={0} max={3} step={0.05} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -339,22 +391,21 @@ export default function AiSettings() {
                 <Col md={12} xs={24}>
                   <Form.Item
                     name="hmm_keep_confused"
-                    label="Quán tính Trạng thái Ẩn HMM (a = P(C_t | C_{t-1}) — Mặc định: 0.78)"
-                    extra="Dự đoán trước: P⁻(t) = a·P(t-1) + β(π_s)·(1 - P(t-1))."
-                    rules={[{ required: true }]}
+                    label={<span>Quán tính HMM (a = P(C_t | C_t-1) → hmmKeepConfused){overrideTag('hmm_keep_confused')}</span>}
+                    extra={`Dự đoán trước: P⁻(t) = a·P(t-1) + β(π_s)·(1 - P(t-1)). Khoảng 0 < a < 1.${defaultHint('hmm_keep_confused')}`}
+                    rules={[{ required: true, message: 'Nhập a' }]}
                   >
-                    <InputNumber min={0.40} max={0.95} step={0.02} style={{ width: '100%' }} />
+                    <InputNumber min={0.01} max={0.99} step={0.01} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
 
                 <Col md={12} xs={24}>
                   <Form.Item
                     name="cooldown_seconds"
-                    label="Thời gian Nghỉ Giữa 2 Lần Can thiệp (`cooldown_seconds` — Mặc định: 180s)"
-                    extra="Tối ưu theo chi phí làm phiền C_FP vs bỏ sót C_FN."
-                    rules={[{ required: true }]}
+                    label={<span>Thời gian nghỉ giữa 2 lần can thiệp (cooldownSeconds){legacyTag('cooldown_seconds')}</span>}
+                    extra="SP-BEF dùng cooldown_sec trong sp_bef_params.json; giá trị này chỉ được lưu lại."
                   >
-                    <InputNumber min={60} max={1800} step={30} style={{ width: '100%' }} />
+                    <InputNumber min={0} max={3600} step={30} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -370,9 +421,8 @@ export default function AiSettings() {
                 <Col md={12} xs={24}>
                   <Form.Item
                     name="face_similarity_threshold"
-                    label="Ngưỡng Khớp Khuôn mặt (`face_similarity_threshold` — Mặc định: 0.55)"
-                    extra="Cosine Similarity tối thiểu giữa vector 192-d hiện tại và 3 góc mặt đã đăng ký."
-                    rules={[{ required: true }]}
+                    label={<span>Ngưỡng khớp khuôn mặt (faceSimilarityThreshold){legacyTag('face_similarity_threshold')}</span>}
+                    extra="Cosine Similarity tối thiểu giữa vector hiện tại và 3 góc mặt đã đăng ký."
                   >
                     <Slider
                       min={0.35}
@@ -386,43 +436,24 @@ export default function AiSettings() {
                 <Col md={12} xs={24}>
                   <Form.Item
                     name="max_absent_checks"
-                    label="Số lần Kiểm tra Vắng mặt Tối đa (`max_absent_checks` — Mặc định: 6)"
-                    extra="Kiểm tra mỗi 5 giây: 6 lần liên tiếp (30 giây) không thấy mặt -> Tạm dừng video."
-                    rules={[{ required: true }]}
+                    label={<span>Số lần kiểm tra vắng mặt tối đa (maxAbsentChecks){legacyTag('max_absent_checks')}</span>}
+                    extra="Kiểm tra mỗi 5 giây; vượt ngưỡng thì tạm dừng video."
                   >
-                    <InputNumber min={2} max={20} style={{ width: '100%' }} />
+                    <InputNumber min={0} max={20} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
               </Row>
 
-              <Row gutter={16}>
-                <Col md={12} xs={24}>
-                  <Form.Item name="active_predictor" label="Cơ chế Hợp nhất trên Go Backend & Web Worker">
-                    <Select
-                      options={[
-                        {
-                          value: 'sp_bef_v2_bayesian_hmm',
-                          label: 'SP-BEF V2 (Calibrated LLR + Segment Prior π_s + 2-State HMM) — Khuyên dùng',
-                        },
-                        {
-                          value: 'mlp_3layer_64_32_16',
-                          label: 'Legacy 3-Layer MLP (64, 32, 16) — mlp_weights.json',
-                        },
-                      ]}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col md={12} xs={24}>
-                  <Form.Item name="llm_vision_model" label="Mô hình Multi-Modal Vision RAG">
-                    <Select
-                      options={[
-                        { value: 'gpt-4o-mini', label: 'OpenAI gpt-4o-mini Vision (Độ trễ thấp)' },
-                        { value: 'gpt-4o', label: 'OpenAI gpt-4o Vision (Chuyên sâu)' },
-                      ]}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
+              <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
+                <Descriptions.Item label="Phiên bản mô hình (modelVersion)">
+                  {settingsMeta?.modelVersion || '-'}
+                </Descriptions.Item>
+                <Descriptions.Item
+                  label={<span>mlThreshold{legacyTag('ml_threshold')}</span>}
+                >
+                  {fmt(settingsMeta?.ml_threshold)} (chỉ hiển thị; SP-BEF quyết định theo θ_on)
+                </Descriptions.Item>
+              </Descriptions>
 
               <Button
                 type="primary"
@@ -532,13 +563,13 @@ export default function AiSettings() {
                 <code>π_s</code> từ mật độ tua lại MOOCCubeX
               </Descriptions.Item>
               <Descriptions.Item label="Temporal Filter (C5)">
-                2-State HMM + Hysteresis (0.62 / 0.42)
+                2-State HMM + Hysteresis ({fmt(settingsMeta?.theta_on)} / {fmt(settingsMeta?.theta_off)})
               </Descriptions.Item>
               <Descriptions.Item label="RAG Strategy">
                 3-Tier (`pgvector` &rarr; `Segment` &rarr; `Slice`)
               </Descriptions.Item>
-              <Descriptions.Item label="Cập nhật lần cuối">
-                {settingsMeta?.updated_at || '2026-10-26 10:00:00'}
+              <Descriptions.Item label="Nguồn cấu hình">
+                {settingsMeta?.source === 'demo' ? 'Dữ liệu demo ngoại tuyến' : settingsMeta ? 'lms-api' : '-'}
               </Descriptions.Item>
             </Descriptions>
           </div>

@@ -12,7 +12,8 @@
     "theta_on": 0.4,
     "theta_off": 0.25,
     "min_hold_sec": 10.0,
-    "cooldown_sec": 180.0
+    "cooldown_sec": 180.0,
+    "w_gaze": 0.0
   },
   "segment_prior": {
     "source": "uniform_cold_start (no per-segment confusion labels in open data)",
@@ -376,6 +377,47 @@
         ]
       },
       "enabled": true
+    },
+    "gaze": {
+      "feature_names": [
+        "dwell_ratio",
+        "reread_count",
+        "para_regression_rate",
+        "sweep_ratio",
+        "gaze_transition_entropy",
+        "saccade_rate"
+      ],
+      "scaler_mean": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scaler_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "coefficients": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "intercept": -1.734601,
+      "base_rate": 0.15,
+      "isotonic_xp": [],
+      "isotonic_fp": [],
+      "trained": false,
+      "enabled": false,
+      "source": "untrained: collect reading_gaze_samples, then run ml/07_train_gaze_branch.py --logs"
     }
   },
   "evaluation": {

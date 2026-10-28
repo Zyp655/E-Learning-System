@@ -26,6 +26,7 @@ import {
 import PageTitle from '../../components/PageTitle';
 import ActionBar from '../../components/ActionBar';
 import FilterBar from '../../components/FilterBar';
+import { showApiError } from '../../utils/api';
 import usersApi from '../../api/users';
 import academicApi from '../../api/academic';
 import UserForm from './UserForm';
@@ -122,12 +123,17 @@ export default function Users() {
     confirm({
       title: `Reset Dữ liệu Khuôn mặt Sinh trắc học (${record.full_name})?`,
       content:
-        'Hệ thống sẽ gọi đồng thời DELETE /v1/admin/users/:id/face và DELETE /v1/student/face để xóa 3 vector 192 chiều (Thẳng, Trái, Phải) trong bảng face_embeddings. Sinh viên sẽ được yêu cầu đăng ký lại khuôn mặt ở lần vào học kế tiếp.',
+        'Hệ thống sẽ gọi DELETE /v1/admin/users/:id/face để xóa 3 vector 192 chiều (Thẳng, Trái, Phải) trong bảng face_embeddings. Sinh viên sẽ được yêu cầu đăng ký lại khuôn mặt ở lần vào học kế tiếp.',
       okText: 'Xác nhận Reset Face Embeddings',
       okType: 'danger',
       cancelText: 'Hủy',
       onOk: async () => {
-        await usersApi.resetFaceEmbedding(record.id);
+        try {
+          await usersApi.resetFaceEmbedding(record.id);
+        } catch (error) {
+          showApiError(error, 'lms-api từ chối xóa dữ liệu khuôn mặt');
+          return;
+        }
         message.success(
           `Đã xóa dữ liệu sinh trắc học khuôn mặt của ${record.full_name}. Sinh viên có thể đăng ký lại tại /student/face-setup.`
         );

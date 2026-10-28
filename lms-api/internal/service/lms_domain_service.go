@@ -50,7 +50,7 @@ func NewLMSDomainService(
 		gradingSvc:     gradingSvc,
 		attendanceEng:  attendanceEng,
 		queuePublisher: queuePublisher,
-		confusionCfg:   config.GetConfig().ConfusionCfg,
+		confusionCfg:   config.GetConfusionConfig(),
 	}
 }
 
@@ -496,18 +496,18 @@ func (s *LMSDomainService) createGeneratedQuizInDB(ctx context.Context, courseID
 	cacheKey := hex.EncodeToString(hash[:])
 
 	quiz := entity.Quiz{
-		CourseID:           courseID,
-		ModuleID:           moduleID,
-		CreatorID:          creatorID,
-		Title:              title,
-		Description:        fmt.Sprintf("Bộ câu hỏi trắc nghiệm chủ đề %s (Độ khó: %s)", topic, difficulty),
-		Difficulty:         difficulty,
-		TimeLimitMinutes:   15,
-		PassingScore:       70,
-		IsAdaptive:         true,
-		GenerationSource:   "ai_topic",
-		QuestionsCount:     3,
-		IsPublished:        true,
+		CourseID:         courseID,
+		ModuleID:         moduleID,
+		CreatorID:        creatorID,
+		Title:            title,
+		Description:      fmt.Sprintf("Bộ câu hỏi trắc nghiệm chủ đề %s (Độ khó: %s)", topic, difficulty),
+		Difficulty:       difficulty,
+		TimeLimitMinutes: 15,
+		PassingScore:     70,
+		IsAdaptive:       true,
+		GenerationSource: "ai_topic",
+		QuestionsCount:   3,
+		IsPublished:      true,
 	}
 	s.db.WithContext(ctx).Create(&quiz)
 
@@ -586,15 +586,15 @@ type LessonHotspotItem struct {
 }
 
 type TeacherConfusionAnalyticsResult struct {
-	CourseID               int64                  `json:"courseId"`
-	LessonID               int64                  `json:"lessonId"`
-	TotalConfusionSessions int64                  `json:"totalConfusionSessions"`
-	TotalAutoInterventions int64                  `json:"totalAutoInterventions"`
-	InterventionResolvedPct float64               `json:"interventionResolvedPct"`
-	AvgMLProbability       float64                `json:"avgMlProbability"`
-	Hotspots               []LessonHotspotItem    `json:"hotspots"`
-	RecentEpisodes         []entity.ConfusionEpisode `json:"recentEpisodes"`
-	BehaviorReport         *entity.BehaviorReport `json:"behaviorReport"`
+	CourseID                int64                     `json:"courseId"`
+	LessonID                int64                     `json:"lessonId"`
+	TotalConfusionSessions  int64                     `json:"totalConfusionSessions"`
+	TotalAutoInterventions  int64                     `json:"totalAutoInterventions"`
+	InterventionResolvedPct float64                   `json:"interventionResolvedPct"`
+	AvgMLProbability        float64                   `json:"avgMlProbability"`
+	Hotspots                []LessonHotspotItem       `json:"hotspots"`
+	RecentEpisodes          []entity.ConfusionEpisode `json:"recentEpisodes"`
+	BehaviorReport          *entity.BehaviorReport    `json:"behaviorReport"`
 }
 
 func (s *LMSDomainService) GetTeacherConfusionAnalytics(ctx context.Context, courseID, lessonID int64, forceRegenerateReport bool) (*TeacherConfusionAnalyticsResult, error) {
@@ -710,19 +710,19 @@ func (s *LMSDomainService) GetTeacherConfusionAnalytics(ctx context.Context, cou
 }
 
 type AtRiskStudentItem struct {
-	UserID            int64   `json:"userId"`
-	FullName          string  `json:"fullName"`
-	StudentCode       string  `json:"studentCode"`
-	Email             string  `json:"email"`
-	AvatarURL         string  `json:"avatarUrl"`
-	Major             string  `json:"major"`
-	ProgressPercent   float64 `json:"progressPercent"`
-	ConfusionCount    int64   `json:"confusionCount"`
-	AvgQuizScore      float64 `json:"avgQuizScore"`
-	AbsenceCount      int64   `json:"absenceCount"`
-	RiskLevel         string  `json:"riskLevel"` // high, medium, low
-	RiskReason        string  `json:"riskReason"`
-	LastActiveAt      string  `json:"lastActiveAt"`
+	UserID          int64   `json:"userId"`
+	FullName        string  `json:"fullName"`
+	StudentCode     string  `json:"studentCode"`
+	Email           string  `json:"email"`
+	AvatarURL       string  `json:"avatarUrl"`
+	Major           string  `json:"major"`
+	ProgressPercent float64 `json:"progressPercent"`
+	ConfusionCount  int64   `json:"confusionCount"`
+	AvgQuizScore    float64 `json:"avgQuizScore"`
+	AbsenceCount    int64   `json:"absenceCount"`
+	RiskLevel       string  `json:"riskLevel"` // high, medium, low
+	RiskReason      string  `json:"riskReason"`
+	LastActiveAt    string  `json:"lastActiveAt"`
 }
 
 func (s *LMSDomainService) GetAtRiskStudents(ctx context.Context, courseID int64) ([]AtRiskStudentItem, error) {
@@ -806,9 +806,16 @@ func (s *LMSDomainService) GlobalSearch(ctx context.Context, query string) (*Glo
 	return res, nil
 }
 
-// Seed / Regenerate utility for Admin
+// Seed / Regenerate utility for Admin. Follows the same APP_ENV / SEED_DEMO_DATA policy as startup.
 func (s *LMSDomainService) TriggerSeedData(ctx context.Context) error {
-	return postgres.SeedDatabase(s.db)
+	enabled, password, err := config.GetConfig().DemoSeedPlan()
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return fmt.Errorf("demo seed is disabled for APP_ENV=%s (set SEED_DEMO_DATA=true and SEED_DEMO_PASSWORD)", config.GetConfig().ServerCfg.AppEnv)
+	}
+	return postgres.SeedDatabase(s.db, password)
 }
 
 func (s *LMSDomainService) RegenerateEmbeddings(ctx context.Context) (int, error) {

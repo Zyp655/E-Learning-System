@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { lmsApi, type ConfusionPredictResult } from '@/api';
+import { describeApiError, lmsApi, type ConfusionPredictResult } from '@/api';
 import type {
   ConfusionExplanationResult,
   EmotionLabel,
@@ -139,6 +139,11 @@ export interface ConfusionState {
   contribFace: number;
   contribBeh: number;
   contribQuiz: number;
+  // Reading View gaze branch: latest per-paragraph evidence, held until the reader leaves the Reading View.
+  llrGaze: number;
+  rGaze: number;
+  contribGaze: number;
+  readingSegmentPrior: number | null;
   segmentPrior: number;
   highDurationSec: number;
   apiStatus: 'ok' | 'indeterminate';
@@ -152,6 +157,8 @@ export interface ConfusionState {
   activeIntervention: ConfusionExplanationResult | null;
   interventionOpen: boolean;
   interventionLoading: boolean;
+  /** Set when /v1/student/confusion/explain fails; the overlay shows it instead of an explanation. */
+  interventionError: string | null;
   resolvedEpisodesCount: number;
   // Soft, non-blocking "is this part hard?" prompt raised by SP-BEF (camera/behaviour/quiz evidence is weak,
   // so the model asks instead of opening the tutor on its own).
@@ -193,6 +200,11 @@ export interface ConfusionState {
     nowMs?: number,
   ) => void;
   evictExpiredWindows: (nowMs?: number) => void;
+  updateReadingGazeEvidence: (
+    evidence: { llrGaze: number; rGaze: number; segmentPrior: number },
+    nowMs?: number,
+  ) => void;
+  clearReadingGazeEvidence: () => void;
   syncPredictConfusionWithApi: () => Promise<ConfusionPredictResult>;
   setApiStatus: (status: 'ok' | 'indeterminate') => void;
   recordBiometricCheck: (
@@ -286,6 +298,9 @@ function computeWindowedFeaturesAndSpBef(params: {
   cooldownRemainingSec: number;
   videoTimestampSec: number;
   nowMs: number;
+  llrGaze: number;
+  rGaze: number;
+  readingSegmentPrior: number | null;
 }) {
   const validPauses = params.pauseEvents.filter(
     (e) => params.nowMs - e.timestampMs <= BEHAVIOR_WINDOW_MS,
@@ -436,7 +451,8 @@ function computeWindowedFeaturesAndSpBef(params: {
     llrQuiz = predictLinearCalibratedBranch(quizVec, SP_BEF_PARAMS.branches.quiz).llr;
   }
 
-  const segmentPrior = getSegmentPriorForTimestamp(params.videoTimestampSec);
+  const segmentPrior =
+    params.readingSegmentPrior ?? getSegmentPriorForTimestamp(params.videoTimestampSec);
   const step = spBefStep(
     params.prevPosterior,
     segmentPrior,
@@ -451,6 +467,8 @@ function computeWindowedFeaturesAndSpBef(params: {
     params.prevIntervening,
     params.cooldownRemainingSec,
     5.0,
+    params.llrGaze,
+    params.rGaze,
   );
 
   return {
@@ -516,6 +534,10 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
   contribFace: 0,
   contribBeh: 0,
   contribQuiz: 0,
+  llrGaze: 0,
+  rGaze: 0,
+  contribGaze: 0,
+  readingSegmentPrior: null,
   segmentPrior: COLD_START_POSTERIOR,
   highDurationSec: 0,
   apiStatus: 'ok',
@@ -526,6 +548,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
   activeIntervention: null,
   interventionOpen: false,
   interventionLoading: false,
+  interventionError: null,
   resolvedEpisodesCount: 0,
   nudgeOpen: false,
 
@@ -583,6 +606,9 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       prevHighSec: state.highDurationSec,
       prevIntervening: state.interventionOpen,
       cooldownRemainingSec: state.cooldownRemainingSec,
+      llrGaze: state.llrGaze,
+      rGaze: state.rGaze,
+      readingSegmentPrior: state.readingSegmentPrior,
       videoTimestampSec: m.videoTimestampSec,
       nowMs,
     });
@@ -652,6 +678,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribFace: computed.step.contrib_face,
       contribBeh: computed.step.contrib_beh,
       contribQuiz: computed.step.contrib_quiz,
+      contribGaze: computed.step.contrib_gaze,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
       ...nudgeOnIntervene(state, computed.step),
@@ -675,6 +702,9 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       prevHighSec: state.highDurationSec,
       prevIntervening: state.interventionOpen,
       cooldownRemainingSec: state.cooldownRemainingSec,
+      llrGaze: state.llrGaze,
+      rGaze: state.rGaze,
+      readingSegmentPrior: state.readingSegmentPrior,
       videoTimestampSec: 0,
       nowMs,
     });
@@ -709,6 +739,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribFace: computed.step.contrib_face,
       contribBeh: computed.step.contrib_beh,
       contribQuiz: computed.step.contrib_quiz,
+      contribGaze: computed.step.contrib_gaze,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
       cooldownRemainingSec: computed.step.cooldown_remaining_sec,
@@ -730,6 +761,9 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       prevHighSec: state.highDurationSec,
       prevIntervening: state.interventionOpen,
       cooldownRemainingSec: state.cooldownRemainingSec,
+      llrGaze: state.llrGaze,
+      rGaze: state.rGaze,
+      readingSegmentPrior: state.readingSegmentPrior,
       videoTimestampSec: toSec,
       nowMs,
     });
@@ -764,6 +798,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribFace: computed.step.contrib_face,
       contribBeh: computed.step.contrib_beh,
       contribQuiz: computed.step.contrib_quiz,
+      contribGaze: computed.step.contrib_gaze,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
       cooldownRemainingSec: computed.step.cooldown_remaining_sec,
@@ -785,6 +820,9 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       prevHighSec: state.highDurationSec,
       prevIntervening: state.interventionOpen,
       cooldownRemainingSec: state.cooldownRemainingSec,
+      llrGaze: state.llrGaze,
+      rGaze: state.rGaze,
+      readingSegmentPrior: state.readingSegmentPrior,
       videoTimestampSec: 0,
       nowMs,
     });
@@ -809,6 +847,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribFace: computed.step.contrib_face,
       contribBeh: computed.step.contrib_beh,
       contribQuiz: computed.step.contrib_quiz,
+      contribGaze: computed.step.contrib_gaze,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
       cooldownRemainingSec: computed.step.cooldown_remaining_sec,
@@ -833,6 +872,9 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       prevHighSec: state.highDurationSec,
       prevIntervening: state.interventionOpen,
       cooldownRemainingSec: state.cooldownRemainingSec,
+      llrGaze: state.llrGaze,
+      rGaze: state.rGaze,
+      readingSegmentPrior: state.readingSegmentPrior,
       videoTimestampSec: 0,
       nowMs,
     });
@@ -857,6 +899,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribFace: computed.step.contrib_face,
       contribBeh: computed.step.contrib_beh,
       contribQuiz: computed.step.contrib_quiz,
+      contribGaze: computed.step.contrib_gaze,
       segmentPrior: computed.step.segment_prior,
       highDurationSec: computed.step.high_duration_sec,
       cooldownRemainingSec: computed.step.cooldown_remaining_sec,
@@ -877,11 +920,66 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       prevHighSec: state.highDurationSec,
       prevIntervening: state.interventionOpen,
       cooldownRemainingSec: state.cooldownRemainingSec,
+      llrGaze: state.llrGaze,
+      rGaze: state.rGaze,
+      readingSegmentPrior: state.readingSegmentPrior,
       videoTimestampSec: 0,
       nowMs,
     });
 
     set({
+      pauseEvents: computed.validPauses,
+      rewindEvents: computed.validRewinds,
+      speedEvents: computed.validSpeeds,
+      quizEvents: computed.validQuizzes,
+      frameWindow: computed.validFrames,
+      features12: computed.features12,
+      mlProb: computed.step.posterior_prob,
+      mlLevel: state.apiStatus === 'indeterminate' ? 'unknown' : computed.step.level,
+      posteriorProb: computed.step.posterior_prob,
+      priorProb: computed.step.prior_prob,
+      llrFace: computed.step.llr_face,
+      llrBeh: computed.step.llr_beh,
+      llrQuiz: computed.step.llr_quiz,
+      rFace: computed.step.r_face,
+      rBeh: computed.step.r_beh,
+      rQuiz: computed.step.r_quiz,
+      contribFace: computed.step.contrib_face,
+      contribBeh: computed.step.contrib_beh,
+      contribQuiz: computed.step.contrib_quiz,
+      contribGaze: computed.step.contrib_gaze,
+      segmentPrior: computed.step.segment_prior,
+      highDurationSec: computed.step.high_duration_sec,
+      cooldownRemainingSec: computed.step.cooldown_remaining_sec,
+      ...nudgeOnIntervene(state, computed.step),
+    });
+  },
+
+  updateReadingGazeEvidence: ({ llrGaze, rGaze, segmentPrior }, nowMs = Date.now()) => {
+    const state = get();
+    const computed = computeWindowedFeaturesAndSpBef({
+      pauseEvents: state.pauseEvents,
+      rewindEvents: state.rewindEvents,
+      speedEvents: state.speedEvents,
+      quizEvents: state.quizEvents,
+      frameWindow: state.frameWindow,
+      negEmotionStreak: state.features12.neg_emotion_streak,
+      prevPosterior: state.posteriorProb,
+      prevHighSec: state.highDurationSec,
+      prevIntervening: state.interventionOpen,
+      cooldownRemainingSec: state.cooldownRemainingSec,
+      llrGaze,
+      rGaze,
+      readingSegmentPrior: segmentPrior,
+      videoTimestampSec: 0,
+      nowMs,
+    });
+
+    set({
+      llrGaze: computed.step.llr_gaze,
+      rGaze: computed.step.r_gaze,
+      contribGaze: computed.step.contrib_gaze,
+      readingSegmentPrior: segmentPrior,
       pauseEvents: computed.validPauses,
       rewindEvents: computed.validRewinds,
       speedEvents: computed.validSpeeds,
@@ -908,6 +1006,9 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
     });
   },
 
+  clearReadingGazeEvidence: () =>
+    set({ llrGaze: 0, rGaze: 0, contribGaze: 0, readingSegmentPrior: null }),
+
   syncPredictConfusionWithApi: async () => {
     const state = get();
     // Send the on-device branch evidence (LLR + reliability) and HMM state, never raw face data, so the
@@ -921,6 +1022,9 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       hasQuiz: state.rQuiz > 0,
       llrQuiz: state.llrQuiz,
       rQuiz: state.rQuiz,
+      hasGaze: state.rGaze > 0,
+      llrGaze: state.llrGaze,
+      rGaze: state.rGaze,
       segmentPrior: state.segmentPrior,
       prevPosterior: state.posteriorProb,
       prevHighSec: state.highDurationSec,
@@ -963,7 +1067,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
           violationType: 'face_absent_30s',
           videoTimestampSec,
           similarityScore: 0,
-        });
+        }).catch((err: unknown) => console.warn('[proctoring] violation not logged:', describeApiError(err)));
       }
       set({
         faceSimilarity: 0,
@@ -981,7 +1085,7 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
           violationType: 'identity_mismatch',
           videoTimestampSec,
           similarityScore: similarity,
-        });
+        }).catch((err: unknown) => console.warn('[proctoring] violation not logged:', describeApiError(err)));
       }
       set({
         faceSimilarity: similarity,
@@ -1039,28 +1143,34 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
 
     set({
       interventionLoading: true,
+      interventionError: null,
       interventionOpen: true,
       lastTriggerTimestampMs: now,
       cooldownRemainingSec: 180,
     });
 
-    const explanation = await lmsApi.explainConfusion({
-      lessonId,
-      timestamp: videoTimestampSec,
-      totalDuration: 1080,
-      confusionSignals: {
-        pauseCount: state.features12.pause_count,
-        rewindCount: state.features12.rewind_count,
-        emotion: state.currentEmotion,
-        mlProb: state.posteriorProb,
-        ruleScore: state.ruleScore,
-      },
-    });
-
-    set({
-      activeIntervention: explanation,
-      interventionLoading: false,
-    });
+    try {
+      const explanation = await lmsApi.explainConfusion({
+        lessonId,
+        timestamp: videoTimestampSec,
+        totalDuration: 1080,
+        confusionSignals: {
+          pauseCount: state.features12.pause_count,
+          rewindCount: state.features12.rewind_count,
+          emotion: state.currentEmotion,
+          mlProb: state.posteriorProb,
+          ruleScore: state.ruleScore,
+        },
+      });
+      set({ activeIntervention: explanation, interventionLoading: false });
+    } catch (err) {
+      // No fabricated explanation: the overlay shows why the AI could not answer.
+      set({
+        activeIntervention: null,
+        interventionLoading: false,
+        interventionError: describeApiError(err),
+      });
+    }
   },
 
   closeIntervention: (feedback) =>
@@ -1120,6 +1230,10 @@ export const useConfusionStore = create<ConfusionState>((set, get) => ({
       contribFace: 0,
       contribBeh: 0,
       contribQuiz: 0,
+      llrGaze: 0,
+      rGaze: 0,
+      contribGaze: 0,
+      readingSegmentPrior: null,
       segmentPrior: COLD_START_POSTERIOR,
       highDurationSec: 0,
       apiStatus: 'ok',

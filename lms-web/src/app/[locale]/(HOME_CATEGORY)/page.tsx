@@ -9,6 +9,7 @@ import {
   Button,
   ButtonLink,
   Card,
+  FieldError,
   ProgressBar,
   SearchInput,
   SellerInfo,
@@ -22,13 +23,14 @@ import {
   MOCK_SPECIALIZATIONS,
   MOCK_STUDENT_PROFILE,
 } from '@/api/mockData';
-import { lmsApi } from '@/api';
+import { describeApiError, lmsApi } from '@/api';
 
 const CATEGORIES = [
   'Tất cả học phần',
   'Trí tuệ Nhân tạo & Thị giác Máy tính',
   'Học sâu & Xử lý Ngôn ngữ Tự nhiên',
   'Khoa học Dữ liệu & Kỹ thuật Phần mềm',
+  'Lập trình',
 ];
 
 export default function HomePage() {
@@ -37,6 +39,7 @@ export default function HomePage() {
   const [specializations, setSpecializations] = useState(MOCK_SPECIALIZATIONS);
   const [enrollingId, setEnrollingId] = useState<number | null>(null);
   const [enrollToast, setEnrollToast] = useState<string | null>(null);
+  const [enrollError, setEnrollError] = useState<string | null>(null);
 
   const filteredCourses = useMemo(() => {
     return MOCK_COURSES.filter((c) => {
@@ -54,6 +57,7 @@ export default function HomePage() {
 
   const handleEnrollSpecialization = async (specId: number) => {
     setEnrollingId(specId);
+    setEnrollError(null);
     try {
       await lmsApi.enrollSpecialization(specId);
       setSpecializations((prev) =>
@@ -62,6 +66,9 @@ export default function HomePage() {
       setEnrollToast(
         'Đã ghi danh thành công vào toàn bộ Lộ trình Chuyên ngành (3 học phần + Đồ án Capstone)!',
       );
+    } catch (err) {
+      setEnrollToast(null);
+      setEnrollError(`Ghi danh chưa thành công: ${describeApiError(err)}`);
     } finally {
       setEnrollingId(null);
     }
@@ -188,6 +195,7 @@ export default function HomePage() {
             ✓ {enrollToast}
           </div>
         )}
+        <FieldError>{enrollError}</FieldError>
 
         {specializations.map((spec) => {
           const specCourses = spec.courseIds

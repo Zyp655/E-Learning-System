@@ -54,7 +54,7 @@ func (c *ControllerV1) GetAdminStats(ctx context.Context, req *v1.GetAdminStatsR
 	return &v1.GetAdminStatsRes{
 		TotalUsers:                totalUsers,
 		TotalStudents:             totalStudents,
-		TotalTeachers             : totalTeachers,
+		TotalTeachers:             totalTeachers,
 		TotalCourses:              totalCourses,
 		TotalCourseClasses:        totalClasses,
 		TotalConfusionSessions:    totalConf,
@@ -267,35 +267,125 @@ func (c *ControllerV1) ListBulkImports(ctx context.Context, req *v1.ListBulkImpo
 	return &v1.ListBulkImportsRes{Items: items}, nil
 }
 
-func (c *ControllerV1) GetConfusionSettings(ctx context.Context, req *v1.GetConfusionSettingsReq) (res *v1.GetConfusionSettingsRes, err error) {
+// confusionLegacyFields are accepted and stored by PUT /admin/confusion/settings but not read by the server.
+var confusionLegacyFields = []string{"mlThreshold", "slidingWindowSize", "cooldownSeconds", "faceSimilarityThreshold", "maxAbsentChecks"}
+
+func (c *ControllerV1) predictor() *service.ConfusionPredictor {
+	if c.svc != nil && c.svc.Predictor() != nil {
+		return c.svc.Predictor()
+	}
+	return service.GetConfusionPredictor()
+}
+
+func (c *ControllerV1) confusionSettingsRes(cc config.ConfusionConfig) *v1.GetConfusionSettingsRes {
+	p := c.predictor()
+	shipped := p.SPBEFConfig()
+	eff := p.EffectiveFusionConfig()
 	return &v1.GetConfusionSettingsRes{
-		Settings: config.GetConfig().ConfusionCfg,
-	}, nil
+		Settings: v1.ConfusionSettingsView{
+			MLThreshold:             cc.MLThreshold,
+			RuleThreshold:           cc.RuleThreshold,
+			SlidingWindowSize:       cc.SlidingWindowSize,
+			CooldownSeconds:         cc.CooldownSeconds,
+			FaceSimilarityThreshold: cc.FaceSimilarityThreshold,
+			MaxAbsentChecks:         cc.MaxAbsentChecks,
+			ThetaOn:                 eff.ThetaOn,
+			ThetaOff:                eff.ThetaOff,
+			MinHoldSec:              eff.MinHoldSec,
+			WFace:                   eff.WFace,
+			WBeh:                    eff.WBeh,
+			WQuiz:                   eff.WQuiz,
+			HMMKeepConfused:         eff.HMMKeepConfused,
+		},
+		SPBEFDefaults: v1.SPBEFFusionValues{
+			ThetaOn:         shipped.Fusion.ThetaOn,
+			ThetaOff:        shipped.Fusion.ThetaOff,
+			MinHoldSec:      shipped.Fusion.MinHoldSec,
+			WFace:           shipped.Fusion.WFace,
+			WBeh:            shipped.Fusion.WBeh,
+			WQuiz:           shipped.Fusion.WQuiz,
+			HMMKeepConfused: shipped.Fusion.HMMKeepConfused,
+		},
+		SPBEFOverrides: cc.SPBEF,
+		LegacyFields:   append([]string(nil), confusionLegacyFields...),
+		ModelVersion:   shipped.Version,
+	}
+}
+
+func (c *ControllerV1) GetConfusionSettings(ctx context.Context, req *v1.GetConfusionSettingsReq) (res *v1.GetConfusionSettingsRes, err error) {
+	return c.confusionSettingsRes(config.GetConfusionConfig()), nil
+}
+
+// validateLegacyConfusionSettings rejects nonsensical legacy values; 0 still means "keep the current value".
+func validateLegacyConfusionSettings(req *v1.UpdateConfusionSettingsReq) error {
+	for _, f := range []float64{req.MLThreshold, req.RuleThreshold, req.FaceSimilarityThreshold} {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return resCode.ValidationFailed.New("thresholds must be finite numbers")
+		}
+	}
+	switch {
+	case req.MLThreshold < 0 || req.MLThreshold >= 1:
+		return resCode.ValidationFailed.New("mlThreshold must be in (0, 1)")
+	case req.RuleThreshold < 0 || req.RuleThreshold > 100:
+		return resCode.ValidationFailed.New("ruleThreshold must be in (0, 100]")
+	case req.FaceSimilarityThreshold < 0 || req.FaceSimilarityThreshold > 1:
+		return resCode.ValidationFailed.New("faceSimilarityThreshold must be in (0, 1]")
+	case req.SlidingWindowSize < 0 || req.CooldownSeconds < 0 || req.MaxAbsentChecks < 0:
+		return resCode.ValidationFailed.New("slidingWindowSize, cooldownSeconds and maxAbsentChecks must be >= 0")
+	}
+	return nil
 }
 
 func (c *ControllerV1) UpdateConfusionSettings(ctx context.Context, req *v1.UpdateConfusionSettingsReq) (res *v1.UpdateConfusionSettingsRes, err error) {
-	cfg := &config.GetConfig().ConfusionCfg
-	if req.MLThreshold > 0 {
-		cfg.MLThreshold = req.MLThreshold
+	if err := validateLegacyConfusionSettings(req); err != nil {
+		return nil, err
 	}
-	if req.RuleThreshold > 0 {
-		cfg.RuleThreshold = req.RuleThreshold
+	var db *gorm.DB
+	if c.svc != nil {
+		db = c.svc.DB()
 	}
-	if req.SlidingWindowSize > 0 {
-		cfg.SlidingWindowSize = req.SlidingWindowSize
+	cc, err := service.UpdateConfusionSettings(ctx, db, c.predictor(), func(cfg *config.ConfusionConfig) error {
+		if req.MLThreshold > 0 {
+			cfg.MLThreshold = req.MLThreshold
+		}
+		if req.RuleThreshold > 0 {
+			cfg.RuleThreshold = req.RuleThreshold
+		}
+		if req.SlidingWindowSize > 0 {
+			cfg.SlidingWindowSize = req.SlidingWindowSize
+		}
+		if req.CooldownSeconds > 0 {
+			cfg.CooldownSeconds = req.CooldownSeconds
+		}
+		if req.FaceSimilarityThreshold > 0 {
+			cfg.FaceSimilarityThreshold = req.FaceSimilarityThreshold
+		}
+		if req.MaxAbsentChecks > 0 {
+			cfg.MaxAbsentChecks = req.MaxAbsentChecks
+		}
+		if req.ResetSPBEFOverrides {
+			cfg.SPBEF = config.SPBEFOverrides{}
+		}
+		// Copy the values so the stored settings never alias the request.
+		set := func(dst **float64, v *float64) {
+			if v != nil {
+				x := *v
+				*dst = &x
+			}
+		}
+		set(&cfg.SPBEF.ThetaOn, req.ThetaOn)
+		set(&cfg.SPBEF.ThetaOff, req.ThetaOff)
+		set(&cfg.SPBEF.MinHoldSec, req.MinHoldSec)
+		set(&cfg.SPBEF.WFace, req.WFace)
+		set(&cfg.SPBEF.WBeh, req.WBeh)
+		set(&cfg.SPBEF.WQuiz, req.WQuiz)
+		set(&cfg.SPBEF.HMMKeepConfused, req.HMMKeepConfused)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if req.CooldownSeconds > 0 {
-		cfg.CooldownSeconds = req.CooldownSeconds
-	}
-	if req.FaceSimilarityThreshold > 0 {
-		cfg.FaceSimilarityThreshold = req.FaceSimilarityThreshold
-	}
-	if req.MaxAbsentChecks > 0 {
-		cfg.MaxAbsentChecks = req.MaxAbsentChecks
-	}
-	return &v1.UpdateConfusionSettingsRes{
-		Settings: *cfg,
-	}, nil
+	return c.confusionSettingsRes(cc), nil
 }
 
 func (c *ControllerV1) GenerateEmbeddings(ctx context.Context, req *v1.GenerateEmbeddingsReq) (res *v1.GenerateEmbeddingsRes, err error) {
@@ -795,4 +885,3 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
-

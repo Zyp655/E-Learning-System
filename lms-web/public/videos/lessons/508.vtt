@@ -1,0 +1,70 @@
+WEBVTT
+
+00:00:00.600 --> 00:00:07.259
+Chào các bạn, bài này giới thiệu bốn cấu trúc dữ liệu có sẵn của Python, bắt đầu với list.
+
+00:00:07.609 --> 00:00:11.138
+List là một dãy có thứ tự và có thể thay đổi.
+
+00:00:11.488 --> 00:00:14.092
+Phần tử đầu tiên có chỉ số không.
+
+00:00:14.442 --> 00:00:20.141
+Chỉ số âm đếm từ cuối, nên a tại chỉ số trừ một là phần tử cuối cùng.
+
+00:00:20.491 --> 00:00:27.325
+Cú pháp cắt lát a từ start đến stop lấy các phần tử từ vị trí start đến trước vị trí stop.
+
+00:00:27.675 --> 00:00:33.718
+Vì vậy với list từ một đến năm, a cắt từ một đến bốn cho hai, ba, bốn.
+
+00:00:34.068 --> 00:00:41.663
+Phương thức append thêm một phần tử vào cuối list, và hàm len cho biết số phần tử, ở đây là sáu.
+
+00:00:44.600 --> 00:00:47.872
+Cấu trúc thứ hai là dictionary, hay dict.
+
+00:00:48.222 --> 00:00:53.324
+Dict lưu các cặp khoá và giá trị, cho phép tra cứu rất nhanh theo khoá.
+
+00:00:53.674 --> 00:00:57.478
+Trong ví dụ, scores ánh xạ tên sinh viên sang điểm.
+
+00:00:57.828 --> 00:01:01.747
+Gán scores tại khoá Chi bằng chín sẽ thêm một cặp mới.
+
+00:01:02.097 --> 00:01:08.288
+Nếu truy cập bằng dấu ngoặc vuông với một khoá không tồn tại, Python báo lỗi KeyError.
+
+00:01:08.638 --> 00:01:12.800
+Để an toàn, hãy dùng phương thức get kèm giá trị mặc định.
+
+00:01:13.150 --> 00:01:19.292
+Lời gọi get với khoá Dũng và mặc định không sẽ trả về không, vì Dũng chưa có trong dict.
+
+00:01:19.642 --> 00:01:24.768
+Để duyệt cả khoá và giá trị cùng lúc, ta lặp qua scores chấm items.
+
+00:01:27.600 --> 00:01:30.405
+Hai cấu trúc cuối là tuple và set.
+
+00:01:30.755 --> 00:01:39.265
+Tuple giống list nhưng không thể thay đổi sau khi tạo, rất hợp để biểu diễn một bản ghi cố định như toạ độ x, y.
+
+00:01:39.615 --> 00:01:43.832
+Set là tập hợp không có thứ tự và không chứa phần tử trùng.
+
+00:01:44.182 --> 00:01:50.796
+Trong ví dụ, tập tags có hai lần chữ python nhưng chỉ được giữ một lần, nên len bằng hai.
+
+00:01:51.146 --> 00:01:53.622
+Set hỗ trợ các phép toán tập hợp:
+
+00:01:53.972 --> 00:01:59.412
+dấu và cho phần giao, dấu gạch đứng cho phần hợp, dấu trừ cho phần hiệu.
+
+00:01:59.762 --> 00:02:10.066
+Với a là một, hai, ba và b là hai, ba, bốn, phần giao là hai, ba, còn phần hợp là một, hai, ba, bốn.
+
+00:02:10.416 --> 00:02:15.168
+Như vậy bạn đã nắm đủ bốn cấu trúc dữ liệu cơ bản của Python.

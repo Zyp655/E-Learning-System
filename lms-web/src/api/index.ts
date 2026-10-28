@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, isApiError } from './client';
 import {
   MOCK_ASSIGNMENTS,
   MOCK_AT_RISK_STUDENTS,
@@ -18,6 +18,7 @@ import {
 } from './mockData';
 import type {
   CodingChallengeItem,
+  CodingLanguage,
   CodingTestCaseResult,
   ConfusionExplanationResult,
   CourseGradebook,
@@ -25,8 +26,153 @@ import type {
   LessonItem,
   MultimodalFeatures12,
   SpecializationItem,
-  TutorPersona,
 } from './types';
+
+export { ApiError, describeApiError, isApiError } from './client';
+export { authApi, accountModeForRole, type AuthTokenBundle, type AuthUser } from './auth';
+export { streamTutorChat, type TutorStreamRequest } from './tutorStream';
+
+/** One test case of service.CodingExecutionResult.testResults. */
+interface BackendCodingTestResult {
+  name: string;
+  input: string;
+  expected: string;
+  actual: string;
+  passed: boolean;
+  isHidden: boolean;
+  runtimeMs: number;
+}
+
+/** service.CodingExecutionResult (POST /v1/student/coding/run and /submit). */
+interface BackendCodingExecutionResult {
+  passedCount: number;
+  totalCount: number;
+  score: number;
+  status: string;
+  testResults: BackendCodingTestResult[] | null;
+  aiTutorHint: string;
+}
+
+export interface CodingRunResult {
+  results: CodingTestCaseResult[];
+  passedCount: number;
+  totalCount: number;
+  aiFeedback: string;
+}
+
+export interface CodingSubmitResult extends CodingRunResult {
+  score: number;
+  /** lms-api does not compute AST/token similarity yet; null means "not checked". */
+  similarityScore: number | null;
+  honorCodeAccepted: boolean;
+}
+
+const toCodingRunResult = (res: BackendCodingExecutionResult): CodingRunResult => {
+  const results: CodingTestCaseResult[] = (res.testResults || []).map((tr, idx) => ({
+    id: idx + 1,
+    name: tr.name,
+    input: tr.input,
+    expectedOutput: tr.expected,
+    actualOutput: tr.actual,
+    runtimeMs: tr.runtimeMs,
+    passed: tr.passed,
+  }));
+  return {
+    results,
+    passedCount: res.passedCount,
+    totalCount: res.totalCount,
+    aiFeedback: res.aiTutorHint || '',
+  };
+};
+
+/** service.ExplainConfusionOutput (POST /v1/student/confusion/explain). */
+interface BackendExplainConfusionOutput {
+  episodeId: number;
+  summary: string;
+  explanation: string;
+  contentPoints: string[] | null;
+  timestamp: number;
+  timeStr: string;
+  lessonTitle: string;
+  ragSource: string;
+}
+
+const RETRIEVAL_TIERS: ConfusionExplanationResult['retrievalTier'][] = [
+  'vector_semantic',
+  'timestamp_match',
+  'transcript_slice',
+];
+
+const toExplanationResult = (lessonId: number, res: BackendExplainConfusionOutput): ConfusionExplanationResult => ({
+  episodeId: res.episodeId,
+  lessonId,
+  timestampSec: res.timestamp,
+  retrievalTier: RETRIEVAL_TIERS.find((t) => t === res.ragSource) || 'timestamp_match',
+  segmentTitle: res.lessonTitle,
+  summary: res.summary,
+  analogy: res.explanation,
+  contentPoints: res.contentPoints || [],
+  relatedTimestamps: res.timeStr ? [{ label: res.timeStr, sec: res.timestamp }] : [],
+});
+
+/** service.ResetCourseDeadlinesResult. */
+interface BackendResetDeadlinesResult {
+  moduleDeadlines: { dueDate: string; dueDateFormatted: string }[] | null;
+  updatedTasksCount: number;
+  message: string;
+}
+
+/** Local challenge content: lms-api has no GET endpoint for coding challenges (see getCodingChallenge). */
+const findLocalCodingChallenge = (challengeId: number): CodingChallengeItem =>
+  MOCK_CODING_CHALLENGES.find((c) => c.id === challengeId) || MOCK_CODING_CHALLENGES[0];
+
+/**
+ * Local Coding Lab challenge id -> lms-api CodingProblem (seed.go cp1..cp3, created in this order on a fresh
+ * database). Each local challenge shows the same function, statement and tests as its problem (checked against
+ * seed.go by codingParity.test.ts). Challenges without an entry have no grader on the backend: run/submit refuse
+ * them locally instead of letting lms-api grade the code against an unrelated problem. lms-api answers 404 for an
+ * unknown problemId and 400 for a language other than the problem's.
+ */
+export const BACKEND_CODING_PROBLEMS: Readonly<
+  Record<number, { problemId: number; language: CodingLanguage; functionName: string }>
+> = {
+  1: { problemId: 1, language: 'python', functionName: 'detect_eye_lock' },
+  2: { problemId: 2, language: 'python', functionName: 'topological_sort_dag' },
+  3: { problemId: 3, language: 'python', functionName: 'rank_rag_segments' },
+};
+
+export const BACKEND_CODING_PROBLEM_IDS: Readonly<Record<number, number>> = Object.fromEntries(
+  Object.entries(BACKEND_CODING_PROBLEMS).map(([challengeId, p]) => [challengeId, p.problemId]),
+);
+
+export const backendCodingProblemId = (challengeId: number): number | null =>
+  BACKEND_CODING_PROBLEMS[challengeId]?.problemId ?? null;
+
+const ALL_CODING_LANGUAGES: readonly CodingLanguage[] = ['python', 'typescript', 'go'];
+
+/**
+ * Languages the Coding Lab offers for a challenge: only the backend problem's language for a graded challenge
+ * (the grader checks that language only), otherwise every language that has starter code.
+ */
+export const codingLanguagesFor = (challenge: CodingChallengeItem): CodingLanguage[] => {
+  const backend = BACKEND_CODING_PROBLEMS[challenge.id];
+  if (backend) return [backend.language];
+  return ALL_CODING_LANGUAGES.filter((lang) => typeof challenge.starterCode[lang] === 'string');
+};
+
+export const CODING_LAB_NOT_GRADABLE_MESSAGE =
+  'Bài lab này chưa có bộ chấm trên máy chủ LMS nên chưa thể chạy hoặc nộp bài để chấm điểm.';
+
+export const codingLanguageNotGradableMessage = (language: string): string =>
+  `Bộ chấm của bài lab này chỉ hỗ trợ ${language === 'python' ? 'Python' : language}.`;
+
+/** Body of /v1/student/coding/run and /submit. lms-api completes the problem's own lesson, so no lessonId is sent. */
+const codingRequestBody = (payload: { challengeId: number; language: string; code: string }): string => {
+  const backend = BACKEND_CODING_PROBLEMS[payload.challengeId];
+  if (!backend) throw new Error(CODING_LAB_NOT_GRADABLE_MESSAGE);
+  if (payload.language !== backend.language) throw new Error(codingLanguageNotGradableMessage(backend.language));
+  return JSON.stringify({ problemId: backend.problemId, language: payload.language, code: payload.code });
+};
 
 export interface ConfusionPredictResult {
   status: 'ok' | 'indeterminate';
@@ -46,7 +192,35 @@ export interface ConfusionPredictResult {
   contribFace?: number;
   contribBeh?: number;
   contribQuiz?: number;
+  llrGaze?: number;
+  rGaze?: number;
+  contribGaze?: number;
   segmentPrior?: number;
+}
+
+export interface ReadingGazeSamplePayload {
+  lessonId: number;
+  paragraphIndex: number;
+  /** designed_stimulus: label from the calibration lesson design; self_report: answer to the random prompt. */
+  labelSource: 'designed_stimulus' | 'self_report';
+  stimulusType: '' | 'control' | 'factual' | 'contextual';
+  /** 1 clear, 2 slightly unclear, 3 confused, 4 very confused; 0 for designed stimuli. */
+  selfReportLevel: 0 | 1 | 2 | 3 | 4;
+  /** Probability with which this paragraph was prompted (independent of the model's output). */
+  promptProbability: number;
+  dwellRatio: number;
+  rereadCount: number;
+  paraRegressionRate: number;
+  sweepRatio: number;
+  gazeTransitionEntropy: number;
+  saccadeRate: number;
+  rGaze: number;
+  llrGaze: number;
+  calibrationErrorNorm: number;
+  textDifficulty: number;
+  wordCount: number;
+  readingWpm: number;
+  posteriorProb: number;
 }
 
 export const INDETERMINATE_PREDICTION_STATE: ConfusionPredictResult = {
@@ -63,34 +237,18 @@ export const INDETERMINATE_PREDICTION_STATE: ConfusionPredictResult = {
 export const lmsApi = {
   getProfile: () => apiFetch('/v1/user/profile', { method: 'GET' }, MOCK_STUDENT_PROFILE),
 
-  saveFaceEmbedding: (payload: {
-    pose: 'front' | 'left' | 'right';
-    embedding: number[];
-    headYawDeg: number;
-    headPitchDeg?: number;
-  }) =>
-    apiFetch(
-      '/v1/student/face-embedding',
-      { method: 'POST', body: JSON.stringify(payload) },
-      {
-        saved: true,
-        pose: payload.pose,
-        dimensions: payload.embedding.length,
-        l2Normalized: true,
-        updatedAt: new Date().toISOString(),
-      },
-    ),
-
-  registerFaceEmbeddings: (payload: {
-    front: number[];
-    left: number[];
-    right: number[];
-  }) =>
-    apiFetch(
-      '/v1/student/face-embedding',
-      { method: 'POST', body: JSON.stringify(payload) },
-      { registered: true, dimensions: 192, poses: ['front', 'left', 'right'], updatedAt: new Date().toISOString() },
-    ),
+  /**
+   * POST /v1/student/face replaces every stored pose, so the three poses are registered together once
+   * all of them have been captured (per-pose captures stay on the device until then).
+   */
+  registerFaceEmbeddings: (payload: { front: number[]; left: number[]; right: number[] }) =>
+    apiFetch<{ success: boolean; embeddings: unknown[] }>('/v1/student/face', {
+      method: 'POST',
+      body: JSON.stringify({
+        poses: (['front', 'left', 'right'] as const).map((pose) => ({ pose, embedding: payload[pose] })),
+        deviceInfo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 200) : '',
+      }),
+    }),
 
   logFaceViolation: (payload: {
     lessonId: number;
@@ -98,11 +256,17 @@ export const lmsApi = {
     videoTimestampSec: number;
     similarityScore: number;
   }) =>
-    apiFetch(
-      '/v1/student/face/violation',
-      { method: 'POST', body: JSON.stringify(payload) },
-      { logged: true, id: Date.now() },
-    ),
+    apiFetch<{ violation: unknown }>('/v1/student/face/violation', {
+      method: 'POST',
+      body: JSON.stringify({
+        lessonId: payload.lessonId,
+        // lms-api violation types: no_face_30s | identity_mismatch | multiple_faces
+        violationType: payload.violationType === 'face_absent_30s' ? 'no_face_30s' : payload.violationType,
+        videoTimestamp: Math.round(payload.videoTimestampSec),
+        durationSeconds: payload.violationType === 'face_absent_30s' ? 30 : 0,
+        similarityScore: payload.similarityScore,
+      }),
+    }),
 
   getCourses: () => apiFetch<CourseItem[]>('/v1/public/courses', { method: 'GET' }, MOCK_COURSES),
 
@@ -125,10 +289,9 @@ export const lmsApi = {
     }),
 
   markLessonCompleted: (lessonId: number) =>
-    apiFetch(
-      `/v1/student/lessons/${lessonId}/complete`,
-      { method: 'POST', body: JSON.stringify({ lessonId, completedAt: new Date().toISOString() }) },
-      { lessonId, completed: true, completedAt: new Date().toISOString() },
+    apiFetch<{ completedLessonId: number; nextLessonId: number; courseProgressPercent: number }>(
+      `/v1/student/lessons/${lessonId}/complete-reading`,
+      { method: 'POST' },
     ),
 
   getCourseGradebook: (courseId: number): Promise<CourseGradebook> =>
@@ -142,147 +305,91 @@ export const lmsApi = {
     apiFetch<SpecializationItem[]>('/v1/public/specializations', { method: 'GET' }, MOCK_SPECIALIZATIONS),
 
   enrollSpecialization: (specId: number) =>
-    apiFetch(
-      `/v1/student/specializations/${specId}/enroll`,
-      { method: 'POST', body: JSON.stringify({ specializationId: specId }) },
-      { enrolled: true, specializationId: specId, enrolledAt: new Date().toISOString() },
-    ),
+    apiFetch<{ message: string }>(`/v1/student/specializations/${specId}/enroll`, { method: 'POST' }),
 
-  resetCourseDeadlines: (courseId: number) =>
-    apiFetch(
-      `/v1/student/courses/${courseId}/reset-deadlines`,
-      { method: 'POST', body: JSON.stringify({ courseId, shiftDays: 14 }) },
-      () => {
-        const nextDate = new Date(Date.now() + 14 * 86400 * 1000).toISOString().slice(0, 10) + ' 23:59';
-        return {
-          courseId,
-          reset: true,
-          newDeadlineDate: nextDate,
-          message: `Đã tự động dời toàn bộ hạn nộp các chương và bài tập của học phần sang ${nextDate} (Không trừ điểm trễ hạn).`,
-        };
-      },
-    ),
+  resetCourseDeadlines: async (courseId: number) => {
+    const res = await apiFetch<BackendResetDeadlinesResult>(`/v1/student/courses/${courseId}/reset-deadlines`, {
+      method: 'POST',
+    });
+    const deadlines = res.moduleDeadlines || [];
+    const last = deadlines.reduce<(typeof deadlines)[number] | null>(
+      (latest, d) => (!latest || d.dueDate > latest.dueDate ? d : latest),
+      null,
+    );
+    return {
+      courseId,
+      reset: true,
+      newDeadlineDate: last?.dueDateFormatted || '',
+      message: res.message,
+    };
+  },
 
-  getCodingChallenge: (challengeId: number): Promise<CodingChallengeItem> =>
-    apiFetch<CodingChallengeItem>(
-      `/v1/student/coding/${challengeId}`,
-      { method: 'GET' },
-      () => MOCK_CODING_CHALLENGES.find((c) => c.id === challengeId) || MOCK_CODING_CHALLENGES[0],
-    ),
+  /**
+   * Local-only content: lms-api exposes no GET endpoint for a coding challenge (problems are resolved
+   * server-side from problemId/lessonId by /v1/student/coding/run and /submit), so no network call is made.
+   */
+  getCodingChallenge: async (challengeId: number): Promise<CodingChallengeItem> =>
+    findLocalCodingChallenge(challengeId),
 
-  runCodingPublicTests: (payload: {
+  runCodingPublicTests: async (payload: {
     challengeId: number;
-    language: 'python' | 'typescript' | 'go';
+    language: CodingLanguage;
     code: string;
-  }) =>
-    apiFetch<{
-      results: CodingTestCaseResult[];
-      passedCount: number;
-      totalCount: number;
-      aiFeedback: string;
-    }>(
-      '/v1/student/coding/run',
-      { method: 'POST', body: JSON.stringify(payload) },
-      () => {
-        const ch = MOCK_CODING_CHALLENGES.find((c) => c.id === payload.challengeId) || MOCK_CODING_CHALLENGES[0];
-        const publicTests = ch.testCases.filter((tc) => tc.isPublic);
-        const hasIntentionalBug = payload.code.includes('TODO_FAIL') || payload.code.trim().length < 25;
-        const results: CodingTestCaseResult[] = publicTests.map((tc, idx) => {
-          const passed = !hasIntentionalBug || idx === 0;
-          return {
-            id: tc.id,
-            name: tc.name,
-            input: tc.input,
-            expectedOutput: tc.expectedOutput,
-            actualOutput: passed ? tc.expectedOutput : 'Output mismatch (Chưa xử lý điều kiện biên)',
-            runtimeMs: 4 + idx * 3,
-            passed,
-          };
-        });
-        const passedCount = results.filter((r) => r.passed).length;
-        return {
-          results,
-          passedCount,
-          totalCount: results.length,
-          aiFeedback:
-            passedCount === results.length
-              ? `Cả ${passedCount}/${results.length} Public Test Cases đều vượt qua xuất sắc với thời gian thực thi trung bình 6.5ms! Bạn có thể tích chọn Cam kết Danh dự Học thuật và bấm "Nộp bài chấm điểm" để chạy toàn bộ Hidden Test Cases.`
-              : 'Một số Public Test Cases chưa khớp. Hãy kiểm tra lại điều kiện ngưỡng biên theo gợi ý của AI Tutor.',
-        };
-      },
-    ),
+  }): Promise<CodingRunResult> => {
+    const body = codingRequestBody(payload);
+    const res = await apiFetch<BackendCodingExecutionResult>('/v1/student/coding/run', {
+      method: 'POST',
+      body,
+    });
+    return toCodingRunResult(res);
+  },
 
-  submitCodingAllTests: (payload: {
+  submitCodingAllTests: async (payload: {
     challengeId: number;
-    language: 'python' | 'typescript' | 'go';
+    language: CodingLanguage;
     code: string;
     honorCodeAccepted: boolean;
-  }) =>
-    apiFetch<{
-      results: CodingTestCaseResult[];
-      passedCount: number;
-      totalCount: number;
-      score: number;
-      similarityScore: number;
-      honorCodeAccepted: boolean;
-      aiFeedback: string;
-    }>(
-      '/v1/student/coding/submit',
-      { method: 'POST', body: JSON.stringify(payload) },
-      () => {
-        const ch = MOCK_CODING_CHALLENGES.find((c) => c.id === payload.challengeId) || MOCK_CODING_CHALLENGES[0];
-        const hasIntentionalBug = payload.code.includes('TODO_FAIL') || payload.code.trim().length < 25;
-        const results: CodingTestCaseResult[] = ch.testCases.map((tc, idx) => {
-          const passed = !hasIntentionalBug || idx < 2;
-          return {
-            id: tc.id,
-            name: tc.name,
-            input: tc.input,
-            expectedOutput: tc.expectedOutput,
-            actualOutput: passed ? tc.expectedOutput : 'Failed on hidden edge case',
-            runtimeMs: 5 + idx * 4,
-            passed,
-          };
-        });
-        const passedCount = results.filter((r) => r.passed).length;
-        const score = Math.round((passedCount / Math.max(1, results.length)) * 100);
-        return {
-          results,
-          passedCount,
-          totalCount: results.length,
-          score,
-          similarityScore: 3.8,
-          honorCodeAccepted: payload.honorCodeAccepted,
-          aiFeedback:
-            score === 100
-              ? 'Chúc mừng! Bài nộp của bạn vượt qua 4/4 Test Cases (bao gồm cả Hidden Edge Case), đạt 100/100 điểm · Độ trùng lặp AST/Token: 3.8% (Hợp lệ). Điểm đã được đồng bộ vào Bảng điểm Trọng số!'
-              : `Bạn đạt ${score}/100 điểm (${passedCount}/${results.length} Test Cases). Hãy xem chi tiết Test Case bị sai bên dưới.`,
-        };
-      },
-    ),
+  }): Promise<CodingSubmitResult> => {
+    const body = codingRequestBody(payload);
+    const res = await apiFetch<BackendCodingExecutionResult>('/v1/student/coding/submit', {
+      method: 'POST',
+      body,
+    });
+    return {
+      ...toCodingRunResult(res),
+      score: Math.round(res.score),
+      similarityScore: null,
+      honorCodeAccepted: payload.honorCodeAccepted,
+    };
+  },
 
-  submitSegmentQuizAttempt: (payload: {
+  submitSegmentQuizAttempt: async (payload: {
     lessonId: number;
     segmentId: number;
     selectedIndex: number;
-    attemptCount: number;
-    passed: boolean;
-    startTimestamp: number;
-  }) =>
-    apiFetch(
-      '/v1/student/lessons/segment-quiz-attempt',
-      { method: 'POST', body: JSON.stringify(payload) },
-      () => {
-        const mustRewind = !payload.passed && payload.attemptCount >= 3;
-        return {
-          passed: payload.passed,
-          attemptCount: mustRewind ? 0 : payload.attemptCount,
-          mustRewind,
-          rewindToTimestamp: payload.startTimestamp,
-        };
-      },
-    ),
+  }) => {
+    const res = await apiFetch<{
+      isCorrect: boolean;
+      attemptCount: number;
+      mustRewind: boolean;
+      rewindToTimestamp: number;
+      explanation: string;
+      message: string;
+    }>('/v1/student/lessons/segment-quiz-attempt', {
+      method: 'POST',
+      body: JSON.stringify({
+        lessonId: payload.lessonId,
+        segmentId: payload.segmentId,
+        selectedAnswer: payload.selectedIndex,
+      }),
+    });
+    return { ...res, passed: res.isCorrect };
+  },
 
+  /**
+   * The indeterminate state is an honest "no prediction" (the client then relies on its on-device SP-BEF
+   * step), so it is used when the backend is offline or rejects the request; it never claims a result.
+   */
   predictConfusion: (
     payload: MultimodalFeatures12 | Record<string, unknown>,
   ): Promise<ConfusionPredictResult> =>
@@ -290,14 +397,30 @@ export const lmsApi = {
       '/v1/student/confusion/predict',
       {
         method: 'POST',
+        allowMockFallback: true,
         body: JSON.stringify(
           'pause_count' in payload ? { features: payload, threshold: 0.62 } : payload,
         ),
       },
       () => ({ ...INDETERMINATE_PREDICTION_STATE }),
-    ),
+    ).catch((err: unknown) => {
+      if (isApiError(err)) return { ...INDETERMINATE_PREDICTION_STATE };
+      throw err;
+    }),
 
-  explainConfusion: (payload: {
+  // Labelled Reading View gaze window: the training data for ml/07_train_gaze_branch.py.
+  // Fire-and-forget telemetry: { id: null } means "not stored" (offline or rejected), never a fake id.
+  logReadingGazeSample: (payload: ReadingGazeSamplePayload) =>
+    apiFetch<{ id: number | null }>(
+      '/v1/student/confusion/reading-gaze',
+      { method: 'POST', allowMockFallback: true, body: JSON.stringify(payload) },
+      () => ({ id: null }),
+    ).catch((err: unknown) => {
+      if (isApiError(err)) return { id: null };
+      throw err;
+    }),
+
+  explainConfusion: async (payload: {
     lessonId: number;
     timestamp: number;
     totalDuration: number;
@@ -308,141 +431,21 @@ export const lmsApi = {
       mlProb: number;
       ruleScore: number;
     };
-  }) =>
-    apiFetch<ConfusionExplanationResult>(
-      '/v1/student/confusion/explain',
-      { method: 'POST', body: JSON.stringify(payload) },
-      () => {
-        const allLessons = MOCK_COURSES.flatMap((c) => c.modules.flatMap((m) => m.lessons));
-        const lesson = allLessons.find((l) => l.id === payload.lessonId) || MOCK_COURSES[0].modules[0].lessons[0];
-        const seg =
-          lesson.segments.find(
-            (s) => payload.timestamp >= s.startTimestamp && payload.timestamp <= s.endTimestamp,
-          ) || lesson.segments[1] || lesson.segments[0];
-
-        if (!seg || seg.segmentIndex === 1) {
-          return {
-            episodeId: Date.now(),
-            lessonId: payload.lessonId,
-            timestampSec: payload.timestamp,
-            retrievalTier: 'vector_semantic',
-            segmentTitle: seg?.title || lesson.title,
-            summary:
-              'Tại đoạn này, bài giảng giải thích cách phát hiện trạng thái "nhìn đờ mắt" (Eye-Lock) khi gặp kiến thức khó. Thay vì dùng ảnh thô, ta đo tỷ lệ mở mắt EAR > 0.22 kết hợp phương sai Var(EAR) < 0.002 (không chớp mắt) và đầu đứng yên (Nose Drift < 3.5px) để nhân hệ số khuếch đại bối rối gazeBoost = 1.6.',
-            analogy:
-              'Hãy hình dung khi bạn đang đọc một dòng thông báo lỗi phức tạp trong code C++: mắt bạn mở to nhìn chằm chằm vào đúng dòng đó mà quên cả chớp mắt, đầu giữ nguyên vị trí — đó chính là tổ hợp (EAR > 0.22 + Var(EAR) < 0.002 + Gaze Stillness).',
-            contentPoints: [
-              '1. Giải thích từng bước công thức hình học EAR = (||p2-p6|| + ||p3-p5||) / (2*||p1-p4||) tại [02:30]',
-              '2. Tại sao phải lấy đỉnh mũi (landmark 1) làm gốc tọa độ (0,0,0) trước khi đưa vào mạng nơ-ron?',
-              '3. Phân biệt giữa nhìn tập trung bình thường và trạng thái đờ mắt Eye-Lock tại [03:45]',
-            ],
-            relatedTimestamps: [
-              { label: '02:30 · Chuẩn hóa 478 điểm mốc 3D', sec: 150 },
-              { label: '03:45 · Công thức EAR & Gaze Stillness', sec: 225 },
-            ],
-          };
-        }
-
-        if (seg.segmentIndex === 2) {
-          return {
-            episodeId: Date.now(),
-            lessonId: payload.lessonId,
-            timestampSec: payload.timestamp,
-            retrievalTier: 'vector_semantic',
-            segmentTitle: seg.title,
-            summary:
-              'Bạn vừa dừng/tua lại ở phần công thức Temporal Attention của mạng BiLSTM. Hiểu đơn giản: thay vì coi mọi giây trong đoạn video có tầm quan trọng ngang nhau, tầng Attention tính điểm số alpha_t (tổng bằng 1) để "chú ý" mạnh nhất vào đúng khoảnh khắc học sinh nhíu mày sâu nhất.',
-            analogy:
-              'Giống như khi bạn đọc một hàm code dài 30 dòng để tìm bug: bạn lướt nhanh qua các dòng khai báo biến (trọng số alpha_t = 0.01) và dừng lại tập trung 80% sự chú ý vào đúng dòng điều kiện if bị sai (alpha_t = 0.80).',
-            contentPoints: [
-              '1. Minh họa bằng số cụ thể cho công thức alpha_t = softmax(v^T * tanh(W_h * h_t)) tại [09:10]',
-              '2. Vai trò của khối Squeeze-and-Excitation (SE-Block) trước khi đưa chuỗi vào BiLSTM 2 lớp [07:40]',
-              '3. Tại sao Focal Loss (gamma = 2.0) giúp mô hình không bị lệch về lớp Neutral trên tập DAiSEE [10:30]',
-            ],
-            relatedTimestamps: [
-              { label: '07:40 · Khối SE-Block chọn lọc kênh đặc trưng', sec: 460 },
-              { label: '09:10 · Công thức Temporal Attention Pooling', sec: 550 },
-              { label: '10:30 · Hàm mất mát Focal Loss trên DAiSEE', sec: 630 },
-            ],
-          };
-        }
-
-        return {
-          episodeId: Date.now(),
-          lessonId: payload.lessonId,
-          timestampSec: payload.timestamp,
-          retrievalTier: 'vector_semantic',
-          segmentTitle: seg.title,
-          summary:
-            'Phân đoạn này tổng hợp 12 đặc trưng đa phương thức (F1–F6 hành vi xem video + F7–F10 cảm xúc camera + F11–F12 kết quả quiz) qua mạng MLP 3 lớp (64 -> 32 -> 16 -> 1) kết hợp luật cửa sổ trượt để kích hoạt trợ lý ảo đúng lúc.',
-          analogy:
-            'Giống như một giảng viên giàu kinh nghiệm đứng cạnh bạn: thầy không chỉ nhìn nét mặt nhíu mày (F7–F10) mà còn để ý thấy bạn vừa tua lại cùng một đoạn 3 lần (F5) và dừng video 15 giây (F3) để biết chắc chắn bạn đang cần giải thích thêm.',
-          contentPoints: [
-            '1. Ý nghĩa của đặc trưng F5 (rewind_same_spot ±10s) và F3 (long_pause > 10s) tại [13:20]',
-            '2. Cách chuẩn hóa StandardScaler và suy luận ma trận MLP (64, 32, 16) trong < 1ms tại [15:00]',
-            '3. Cơ chế kết hợp Hybrid (mlProb >= 0.60 HOẶC ruleScore >= 35) khi học sinh tắt camera [16:30]',
-          ],
-          relatedTimestamps: [
-            { label: '13:20 · Nhóm đặc trưng Hành vi F1–F6', sec: 800 },
-            { label: '15:00 · Kiến trúc MLP 3 lớp (64, 32, 16)', sec: 900 },
-          ],
-        };
-      },
-    ),
-
-  generateTutorResponse: (payload: {
-    lessonId: number;
-    question: string;
-    persona: TutorPersona;
-    timestampSec: number;
-    hasFrameImage: boolean;
-    studentProfile: { major: string; academicYear: number; level: string };
-  }): {
-    reply: string;
-    citations: { timeLabel: string; seconds: number; snippet: string }[];
-    retrievalTier: string;
-  } => {
-    const { question, persona, hasFrameImage, studentProfile } = payload;
-    const visionNote = hasFrameImage
-      ? `**[Đã phân tích Khung hình Slide/Code bài giảng tại [${Math.floor(payload.timestampSec / 60)
-          .toString()
-          .padStart(2, '0')}:${Math.floor(payload.timestampSec % 60)
-          .toString()
-          .padStart(2, '0')}] qua GPT-4o Vision]**\n\n`
-      : '';
-
-    if (persona === 'socrates') {
-      return {
-        reply: `${visionNote}Chào bạn (Sinh viên Năm ${studentProfile.academicYear} ngành **${studentProfile.major}**)! Câu hỏi của bạn về *"${question}"* chạm đúng điểm mấu chốt của bài giảng.\n\nTheo phương pháp **Gợi mở Socrates**, trước khi mình đưa ra công thức hoàn chỉnh, chúng ta cùng suy luận qua 2 câu hỏi nhỏ nhé:\n\n1. **Gợi mở 1 (Tại mốc [07:40]):** Nếu một đoạn video dài 10 giây chỉ có duy nhất 2 giây học sinh nhíu mày bối rối, điều gì sẽ xảy ra nếu ta chỉ lấy trung bình cộng (Mean Pooling) tất cả 30 khung hình?\n2. **Gợi mở 2 (Tại mốc [09:10]):** Trong lập trình hệ thống phân tán hoặc cơ sở dữ liệu mà ngành KHMT của bạn hay dùng, khi muốn ưu tiên các bản ghi quan trọng hơn, ta thường nhân thêm một hệ số trọng số $w_i$. Vậy ở tầng **Temporal Attention**, hàm toán học nào giúp biến các điểm số $e_t$ thành bộ trọng số $\\alpha_t \\in (0,1)$ có tổng bằng $1.0$?\n\nBạn thử trả lời 1 trong 2 ý trên theo cách hiểu của mình xem sao!`,
-        citations: [
-          { timeLabel: '07:40', seconds: 460, snippet: 'Hạn chế của Mean Pooling trên chuỗi biểu cảm khuôn mặt' },
-          { timeLabel: '09:10', seconds: 550, snippet: 'Công thức trọng số chú ý alpha_t = softmax(v^T tanh(W_h h_t))' },
-        ],
-        retrievalTier: hasFrameImage ? 'vision_multimodal_rag' : 'vector_semantic',
-      };
-    }
-
-    if (persona === 'coach') {
-      return {
-        reply: `${visionNote}Mình sẽ đồng hành cùng bạn (Năm ${studentProfile.academicYear} · **${studentProfile.major}**) bóc tách vấn đề *"${question}"* theo **từng bước thật rõ ràng** nhé:\n\n- **Bước 1 — Chuẩn hóa đầu vào ([02:30]):** Từ khung hình camera hoặc hành vi tua video, ta trích xuất các tín hiệu thô và chuẩn hóa về cùng một thang đo (Nose-Centered cho 478 điểm mốc 3D, hoặc StandardScaler z = (x - mu)/sigma cho 12 đặc trưng).\n- **Bước 2 — Nắm bắt diễn biến thời gian ([07:40]):** Đưa chuỗi qua mạng **BiLSTM 2 chiều** để mỗi trạng thái ẩn h_t vừa biết biểu cảm trước đó vừa biết biểu cảm ngay sau đó.\n- **Bước 3 — Tập trung vào điểm nóng bằng Attention ([09:10]):** Tính alpha_t = softmax(v^T tanh(W_h h_t)) rồi lấy tổng có trọng số c = sum(alpha_t * h_t).\n- **Bước 4 — Quyết định lai Hybrid ([15:00]):** Kết hợp xác suất mạng MLP (p_ML >= 0.70) hoặc điểm luật đa phương thức (RuleScore >= 60) để kích hoạt hỗ trợ.\n\n**Bài tập kiểm tra nhanh 30 giây cho bạn:** Nếu học sinh tua lại cùng một đoạn 2 lần (rewind_same_spot = 2, +40 điểm luật), hệ thống có kích hoạt giải thích ngay cả khi học sinh tắt camera không?`,
-        citations: [
-          { timeLabel: '02:30', seconds: 150, snippet: 'Chuẩn hóa tọa độ 3D và vector đặc trưng' },
-          { timeLabel: '09:10', seconds: 550, snippet: 'Tầng gộp Temporal Attention Pooling' },
-          { timeLabel: '15:00', seconds: 900, snippet: 'Bộ quyết định lai Hybrid ML + Rule-based' },
-        ],
-        retrievalTier: hasFrameImage ? 'vision_multimodal_rag' : 'vector_semantic',
-      };
-    }
-
-    return {
-      reply: `${visionNote}Dưới góc độ học thuật chuyên sâu dành cho sinh viên Năm ${studentProfile.academicYear} chuyên ngành **${studentProfile.major}**, về câu hỏi *"${question}"*, ta phân tích theo cấu trúc 6 phần:\n\n1. **Lý thuyết nền tảng ([02:30]):** Biểu diễn hình học khuôn mặt 478x3 được dịch chuyển gốc về đỉnh mũi l_1 và chuẩn hóa theo khoảng cách hai khóe mắt d_IOD nhằm đạt tính bất biến phép vị tự (Similitude Invariance).\n2. **Cơ chế hoạt động chi tiết ([09:10]):** Với chuỗi trạng thái ẩn hai chiều h_t từ BiLSTM, cơ chế Additive Attention tính năng lượng e_t = v^T tanh(W_h h_t + b_h) và chuẩn hóa alpha_t = softmax(e_t).\n3. **Tích hợp Đa phương thức 12 chiều ([13:20]):** Hợp nhất mức quyết định (Decision- & Feature-level Fusion) giữa đặc trưng hành vi xem video (6 chiều), cảm xúc (4 chiều) và kiểm tra nhận thức (2 chiều).\n4. **So sánh với phương pháp khác:** Trong thực nghiệm Ablation trên DAiSEE, việc loại bỏ Temporal Attention làm giảm 4.2% F1-score, và dùng đa phương thức 12 đặc trưng vượt trội hơn chỉ dùng đơn lẻ kênh hình ảnh.\n5. **Lỗi thường gặp (Pitfalls):** Quên đóng băng hoặc chuẩn hóa StandardScaler giữa lúc huấn luyện Python (ml/) và lúc suy luận thời gian thực trên Go/Web.\n6. **Từ khóa đọc thêm:** *Bahdanau Additive Attention, Squeeze-and-Excitation Networks (Hu et al.), DAiSEE Engagement Dataset, Focal Loss (Lin et al.).*`,
-      citations: [
-        { timeLabel: '02:30', seconds: 150, snippet: 'Chuẩn hóa hình học bất biến vị tự 478 Landmarks' },
-        { timeLabel: '09:10', seconds: 550, snippet: 'Biểu diễn toán học Additive Temporal Attention' },
-        { timeLabel: '13:20', seconds: 800, snippet: 'Không gian đặc trưng đa phương thức 12 chiều' },
-      ],
-      retrievalTier: hasFrameImage ? 'vision_multimodal_rag' : 'vector_semantic',
-    };
+  }): Promise<ConfusionExplanationResult> => {
+    const res = await apiFetch<BackendExplainConfusionOutput>('/v1/student/confusion/explain', {
+      method: 'POST',
+      body: JSON.stringify({
+        lessonId: payload.lessonId,
+        timestamp: Math.round(payload.timestamp),
+        totalDuration: Math.round(payload.totalDuration),
+        pauseCount: payload.confusionSignals.pauseCount,
+        rewindCount: payload.confusionSignals.rewindCount,
+        dominantEmotion: payload.confusionSignals.emotion,
+        mlProb: payload.confusionSignals.mlProb,
+        ruleScore: payload.confusionSignals.ruleScore,
+      }),
+    });
+    return toExplanationResult(payload.lessonId, res);
   },
 
   getSchedules: () => apiFetch('/v1/student/schedule', { method: 'GET' }, MOCK_SCHEDULES),

@@ -36,11 +36,11 @@ type GetPersonalRoadmapRes struct {
 
 type SavePersonalRoadmapReq struct {
 	g.Meta        `path:"/student/personal-roadmap" method:"post" tags:"Roadmaps & Study Plan" summary:"Lưu hoặc cập nhật lộ trình học kỳ cá nhân"`
-	MajorID       int64                           `json:"majorId"`
-	Title         string                          `json:"title"`
-	CareerGoal    string                          `json:"careerGoal"`
-	TargetGPA     float64                         `json:"targetGpa" d:"3.6"`
-	CourseRecords []entity.PersonalRoadmapCourse  `json:"courseRecords"`
+	MajorID       int64                          `json:"majorId"`
+	Title         string                         `json:"title"`
+	CareerGoal    string                         `json:"careerGoal"`
+	TargetGPA     float64                        `json:"targetGpa" d:"3.6"`
+	CourseRecords []entity.PersonalRoadmapCourse `json:"courseRecords"`
 }
 type SavePersonalRoadmapRes struct {
 	PersonalRoadmap *entity.PersonalRoadmap `json:"personalRoadmap"`
@@ -52,12 +52,12 @@ type SuggestElectivesReq struct {
 	Major      string `json:"major"`
 }
 type ElectiveSuggestionItem struct {
-	CourseCode  string `json:"courseCode"`
-	Title       string `json:"title"`
-	Credits     int    `json:"credits"`
-	Semester    int    `json:"semester"`
-	MatchScore  int    `json:"matchScore"`
-	Reason      string `json:"reason"`
+	CourseCode string `json:"courseCode"`
+	Title      string `json:"title"`
+	Credits    int    `json:"credits"`
+	Semester   int    `json:"semester"`
+	MatchScore int    `json:"matchScore"`
+	Reason     string `json:"reason"`
 }
 type SuggestElectivesRes struct {
 	CareerGoal  string                   `json:"careerGoal"`

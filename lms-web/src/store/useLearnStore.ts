@@ -11,6 +11,8 @@ export interface LessonNoteItem {
 }
 
 interface LearnState {
+  /** Lesson the playback state belongs to; the demo state below is for lesson 101. */
+  currentLessonId: number;
   currentTimeSec: number;
   maxWatchedSec: number;
   isPlaying: boolean;
@@ -23,6 +25,8 @@ interface LearnState {
   passedSegments: Record<number, boolean>;
   verifyWatchingModalOpen: boolean;
 
+  /** Starts a different lesson from 0:00 with nothing watched yet; no-op for the current lesson. */
+  startLesson: (lessonId: number) => void;
   setCurrentTimeSec: (sec: number) => void;
   setIsPlaying: (playing: boolean) => void;
   setPlaybackSpeed: (speed: number) => void;
@@ -41,6 +45,7 @@ interface LearnState {
 }
 
 export const useLearnStore = create<LearnState>((set, get) => ({
+  currentLessonId: 101,
   currentTimeSec: 215,
   maxWatchedSec: 650,
   isPlaying: false,
@@ -69,6 +74,19 @@ export const useLearnStore = create<LearnState>((set, get) => ({
   segmentAttempts: {},
   passedSegments: { 1001: true },
   verifyWatchingModalOpen: false,
+
+  startLesson: (lessonId) => {
+    if (get().currentLessonId === lessonId) return;
+    set({
+      currentLessonId: lessonId,
+      currentTimeSec: 0,
+      maxWatchedSec: 0,
+      isPlaying: false,
+      seekTargetSec: null,
+      antiSkipNotice: null,
+      activeSegmentQuizId: null,
+    });
+  },
 
   setCurrentTimeSec: (sec) =>
     set((s) => ({

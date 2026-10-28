@@ -3,20 +3,29 @@ import { Form, Input, Button, Card, Typography, Alert, Space } from 'antd';
 import { LockOutlined, MailOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useDispatch } from 'react-redux';
 import { useHistory } from 'react-router-dom';
-import { login } from '../../redux/actions/AuthActions';
+import { login, isDemoModeEnabled } from '../../redux/actions/AuthActions';
 
 const { Title, Text } = Typography;
 
+// Created by lms-api internal/storage/postgres/seed.go only when APP_ENV is dev/test.
+const DEV_SEED_ADMIN = { email: 'admin@lms.edu.vn', password: '123456' };
+const showDevAccount = process.env.NODE_ENV === 'development';
+
 export default function Login() {
   const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState(null);
   const dispatch = useDispatch();
   const history = useHistory();
 
   const handleFinish = async (values) => {
     setLoading(true);
+    setLoginError(null);
     try {
       await dispatch(login(values));
       history.push('/app/home');
+    } catch (err) {
+      // Single place that reports a failed login (the request is sent with skipErrorToast).
+      setLoginError(err?.message || 'Đăng nhập thất bại');
     } finally {
       setLoading(false);
     }
@@ -67,21 +76,40 @@ export default function Login() {
           </Text>
         </div>
 
-        <Alert
-          type="info"
-          showIcon
-          icon={<SafetyCertificateOutlined />}
-          style={{ marginBottom: 20 }}
-          message="Tài khoản Quản trị Mặc định (Demo/Local)"
-          description="Email: admin@lms-university.edu.vn · Mật khẩu: Admin@123"
-        />
+        {showDevAccount && (
+          <Alert
+            type="info"
+            showIcon
+            icon={<SafetyCertificateOutlined />}
+            style={{ marginBottom: 20 }}
+            message="Tài khoản quản trị seed (chỉ môi trường development)"
+            description={`Email: ${DEV_SEED_ADMIN.email} · Mật khẩu: ${DEV_SEED_ADMIN.password} (lms-api APP_ENV=dev, seed mặc định)`}
+          />
+        )}
+
+        {isDemoModeEnabled() && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 20 }}
+            message="REACT_APP_DEMO_MODE=true"
+            description="Nếu không kết nối được lms-api, trang quản trị sẽ chạy ở chế độ demo ngoại tuyến với dữ liệu mẫu. Sai mật khẩu vẫn bị từ chối."
+          />
+        )}
+
+        {loginError && (
+          <Alert
+            type="error"
+            showIcon
+            role="alert"
+            style={{ marginBottom: 20 }}
+            message={loginError}
+          />
+        )}
 
         <Form
           layout="vertical"
-          initialValues={{
-            email: 'admin@lms-university.edu.vn',
-            password: 'Admin@123',
-          }}
+          initialValues={showDevAccount ? { email: DEV_SEED_ADMIN.email } : undefined}
           onFinish={handleFinish}
         >
           <Form.Item
@@ -95,7 +123,7 @@ export default function Login() {
             <Input
               size="large"
               prefix={<MailOutlined />}
-              placeholder="admin@lms-university.edu.vn"
+              placeholder="admin@lms.edu.vn"
             />
           </Form.Item>
 

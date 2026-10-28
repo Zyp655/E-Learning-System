@@ -1,0 +1,26 @@
+{
+  "name": "lms-web-eslint-toolchain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated ESLint toolchain for lms-web (npm run lint). Kept outside lms-web/package.json so it can be installed from the offline npm cache; see lms-web/scripts/run-eslint.mjs.",
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.5",
+    "eslint": "9.39.4",
+    "eslint-config-next": "15.5.19",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "typescript-eslint": "8.71.2",
+    "@typescript-eslint/eslint-plugin": "8.71.2",
+    "@typescript-eslint/parser": "8.71.2",
+    "@typescript-eslint/project-service": "8.71.2",
+    "@typescript-eslint/scope-manager": "8.71.2",
+    "@typescript-eslint/tsconfig-utils": "8.71.2",
+    "@typescript-eslint/type-utils": "8.71.2",
+    "@typescript-eslint/types": "8.71.2",
+    "@typescript-eslint/typescript-estree": "8.71.2",
+    "@typescript-eslint/utils": "8.71.2",
+    "@typescript-eslint/visitor-keys": "8.71.2",
+    "ignore": "7.0.12"
+  }
+}

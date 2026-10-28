@@ -82,30 +82,51 @@ func (QuizCache) TableName() string { return "quiz_caches" }
 
 type QuizRoom struct {
 	BaseEntity
-	RoomCode            string       `json:"roomCode" gorm:"type:varchar(16);uniqueIndex;not null"`
-	QuizID              int64        `json:"quizId" gorm:"index"`
-	HostUserID          int64        `json:"hostUserId" gorm:"index;not null"`
-	Title               string       `json:"title" gorm:"type:varchar(255)"`
-	Status              string       `json:"status" gorm:"type:varchar(32);default:'waiting'"` // waiting | playing | finished
-	MaxPlayers          int          `json:"maxPlayers" gorm:"not null;default:10"`
-	CurrentQuestion     int          `json:"currentQuestion" gorm:"not null;default:0"`
-	QuestionTimeSeconds int          `json:"questionTimeSeconds" gorm:"not null;default:30"`
-	Players             []RoomPlayer `json:"players,omitempty" gorm:"foreignKey:RoomID"`
+	RoomCode            string `json:"roomCode" gorm:"type:varchar(16);uniqueIndex;not null"`
+	QuizID              int64  `json:"quizId" gorm:"index"`
+	HostUserID          int64  `json:"hostUserId" gorm:"index;not null"`
+	Title               string `json:"title" gorm:"type:varchar(255)"`
+	Status              string `json:"status" gorm:"type:varchar(32);default:'waiting'"` // waiting | playing | finished
+	MaxPlayers          int    `json:"maxPlayers" gorm:"not null;default:10"`
+	CurrentQuestion     int    `json:"currentQuestion" gorm:"not null;default:0"`
+	QuestionTimeSeconds int    `json:"questionTimeSeconds" gorm:"not null;default:30"`
+	// StartedAt is set by the host's start_game; the server derives each question's window (and the speed
+	// bonus) from it instead of trusting a client-reported time.
+	StartedAt *time.Time   `json:"startedAt,omitempty"`
+	Players   []RoomPlayer `json:"players,omitempty" gorm:"foreignKey:RoomID"`
 }
 
 func (QuizRoom) TableName() string { return "quiz_rooms" }
 
+// RoomPlayer is unique per (room, user) so concurrent joins cannot create duplicate leaderboard rows.
 type RoomPlayer struct {
 	BaseEntity
-	RoomID  int64 `json:"roomId" gorm:"index;not null"`
-	UserID  int64 `json:"userId" gorm:"index;not null"`
-	User    *User `json:"user,omitempty" gorm:"foreignKey:UserID"`
-	Score   int   `json:"score" gorm:"not null;default:0"`
-	IsReady bool  `json:"isReady" gorm:"not null;default:false"`
-	Rank    int   `json:"rank" gorm:"default:1"`
+	RoomID       int64 `json:"roomId" gorm:"index;uniqueIndex:idx_room_players_room_user,priority:1;not null"`
+	UserID       int64 `json:"userId" gorm:"index;uniqueIndex:idx_room_players_room_user,priority:2;not null"`
+	User         *User `json:"user,omitempty" gorm:"foreignKey:UserID"`
+	Score        int   `json:"score" gorm:"not null;default:0"`
+	CorrectCount int   `json:"correctCount" gorm:"not null;default:0"`
+	IsReady      bool  `json:"isReady" gorm:"not null;default:false"`
+	Rank         int   `json:"rank" gorm:"default:1"`
 }
 
 func (RoomPlayer) TableName() string { return "room_players" }
+
+// RoomAnswer records one graded answer per (room, user, question). The unique index is the duplicate-answer
+// guard: it survives restarts and is shared by every API replica, and the row is written in the same
+// transaction as the score update, so a failed update leaves the question answerable.
+type RoomAnswer struct {
+	BaseEntity
+	RoomID         int64  `json:"roomId" gorm:"uniqueIndex:idx_room_answers_room_user_question,priority:1;not null"`
+	UserID         int64  `json:"userId" gorm:"uniqueIndex:idx_room_answers_room_user_question,priority:2;index;not null"`
+	QuestionID     int64  `json:"questionId" gorm:"uniqueIndex:idx_room_answers_room_user_question,priority:3;not null"`
+	SelectedAnswer string `json:"selectedAnswer" gorm:"type:text"`
+	Correct        bool   `json:"correct" gorm:"not null;default:false"`
+	ScoreGain      int    `json:"scoreGain" gorm:"not null;default:0"`
+	ElapsedMs      int64  `json:"elapsedMs" gorm:"not null;default:0"`
+}
+
+func (RoomAnswer) TableName() string { return "room_answers" }
 
 type LeaderboardEntry struct {
 	BaseEntity

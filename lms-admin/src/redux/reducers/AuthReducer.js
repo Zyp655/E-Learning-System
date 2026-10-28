@@ -1,16 +1,8 @@
 import { LOGIN, LOGOUT, GET_AUTH_USER, UPDATE_AUTH_USER } from '../types';
 
-const DEFAULT_ADMIN_USER = {
-  id: 1,
-  email: 'admin@lms-university.edu.vn',
-  full_name: 'TS. Nguyễn Quản Trị (System Admin)',
-  role: 'admin',
-  role_code: 2,
-  department_name: 'Phòng Đào tạo & Công nghệ AI',
-};
-
+// No user until lms-api has authenticated one (login or GET /v1/user/profile with a valid token).
 const INIT_STATE = {
-  authUser: DEFAULT_ADMIN_USER,
+  authUser: null,
   token: null,
 };
 
@@ -19,18 +11,18 @@ export default function AuthReducer(state = INIT_STATE, action) {
     case LOGIN:
       return {
         ...state,
-        authUser: action.payload?.user || action.payload || DEFAULT_ADMIN_USER,
-        token: action.payload?.token?.accessToken || action.payload?.token || 'demo-admin-jwt',
+        authUser: action.payload?.user || null,
+        token: action.payload?.token || null,
       };
     case GET_AUTH_USER:
       return {
         ...state,
-        authUser: action.payload || state.authUser || DEFAULT_ADMIN_USER,
+        authUser: action.payload || null,
       };
     case UPDATE_AUTH_USER:
       return {
         ...state,
-        authUser: { ...state.authUser, ...action.payload },
+        authUser: state.authUser ? { ...state.authUser, ...action.payload } : state.authUser,
       };
     case LOGOUT:
       return {

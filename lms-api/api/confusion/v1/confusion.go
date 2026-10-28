@@ -53,6 +53,9 @@ type PredictConfusionReq struct {
 	RBeh                 float64                         `json:"rBeh"`
 	LLRQuiz              float64                         `json:"llrQuiz"`
 	RQuiz                float64                         `json:"rQuiz"`
+	HasGaze              bool                            `json:"hasGaze"`
+	LLRGaze              float64                         `json:"llrGaze"`
+	RGaze                float64                         `json:"rGaze"`
 	FacePresentRatio     float64                         `json:"facePresentRatio"`
 	AvgLuminance         float64                         `json:"avgLuminance"`
 	HeadYawAbsDeg        float64                         `json:"headYawAbsDeg"`
@@ -61,18 +64,18 @@ type PredictConfusionReq struct {
 	FaceFeatures         []float64                       `json:"faceFeatures"`
 	BehaviorFeatures     []float64                       `json:"behaviorFeatures"`
 	QuizFeatures         []float64                       `json:"quizFeatures"`
-	PauseCount           float64                         `json:"pauseCount"`          // F1
-	AvgPauseDuration     float64                         `json:"avgPauseDuration"`    // F2
-	LongPauseCount       float64                         `json:"longPauseCount"`      // F3
-	RewindCount          float64                         `json:"rewindCount"`         // F4
-	RewindSameSpot       float64                         `json:"rewindSameSpot"`      // F5
-	SpeedDecrease        float64                         `json:"speedDecrease"`       // F6
-	ConfusedRatio        float64                         `json:"confusedRatio"`       // F7
-	FrustratedRatio      float64                         `json:"frustratedRatio"`     // F8
-	EmotionTransitions   float64                         `json:"emotionTransitions"`  // F9
-	NegEmotionStreak     float64                         `json:"negEmotionStreak"`    // F10
-	QuizScore            float64                         `json:"quizScore"`           // F11
-	QuizTime             float64                         `json:"quizTime"`            // F12
+	PauseCount           float64                         `json:"pauseCount"`         // F1
+	AvgPauseDuration     float64                         `json:"avgPauseDuration"`   // F2
+	LongPauseCount       float64                         `json:"longPauseCount"`     // F3
+	RewindCount          float64                         `json:"rewindCount"`        // F4
+	RewindSameSpot       float64                         `json:"rewindSameSpot"`     // F5
+	SpeedDecrease        float64                         `json:"speedDecrease"`      // F6
+	ConfusedRatio        float64                         `json:"confusedRatio"`      // F7
+	FrustratedRatio      float64                         `json:"frustratedRatio"`    // F8
+	EmotionTransitions   float64                         `json:"emotionTransitions"` // F9
+	NegEmotionStreak     float64                         `json:"negEmotionStreak"`   // F10
+	QuizScore            float64                         `json:"quizScore"`          // F11
+	QuizTime             float64                         `json:"quizTime"`           // F12
 	QuizAttemptCount     float64                         `json:"quizAttemptCount"`
 	DominantEmotion      string                          `json:"dominantEmotion" d:"confused"`
 	EmotionWindow        []string                        `json:"emotionWindow"`
@@ -84,12 +87,14 @@ type PredictConfusionReq struct {
 }
 
 type PredictConfusionRes struct {
-	SessionID            string  `json:"sessionId,omitempty"`
-	PriorProb            float64 `json:"priorProb"`
-	PosteriorProb        float64 `json:"posteriorProb"`
-	MLProb               float64 `json:"mlProb"`
-	MLPProb              float64 `json:"mlpProb"`
-	LRProb               float64 `json:"lrProb"`
+	SessionID     string  `json:"sessionId,omitempty"`
+	PriorProb     float64 `json:"priorProb" dc:"HMM prior P(confused) before this step's evidence"`
+	PosteriorProb float64 `json:"posteriorProb" dc:"SP-BEF posterior P(confused) after fusing the evidence"`
+	// Deprecated: mlProb, mlpProb and lrProb are kept only for backward compatibility with older clients.
+	// SP-BEF has no MLP or logistic-regression model: mlProb and mlpProb equal posteriorProb, lrProb equals priorProb.
+	MLProb               float64 `json:"mlProb" dc:"Deprecated alias of posteriorProb"`
+	MLPProb              float64 `json:"mlpProb" dc:"Deprecated alias of posteriorProb (no MLP is involved)"`
+	LRProb               float64 `json:"lrProb" dc:"Deprecated alias of priorProb (no logistic regression is involved)"`
 	RuleScore            float64 `json:"ruleScore"`
 	LLRFace              float64 `json:"llrFace"`
 	LLRBeh               float64 `json:"llrBeh"`
@@ -100,6 +105,9 @@ type PredictConfusionRes struct {
 	ContribFace          float64 `json:"contribFace"`
 	ContribBeh           float64 `json:"contribBeh"`
 	ContribQuiz          float64 `json:"contribQuiz"`
+	LLRGaze              float64 `json:"llrGaze"`
+	RGaze                float64 `json:"rGaze"`
+	ContribGaze          float64 `json:"contribGaze"`
 	SegmentPrior         float64 `json:"segmentPrior"`
 	HighDurationSec      float64 `json:"highDurationSec"`
 	CooldownRemainingSec float64 `json:"cooldownRemainingSec"`
@@ -160,6 +168,38 @@ type LogConfusionSessionReq struct {
 	SelfReportLevel     int     `json:"selfReportLevel"`
 	EmotionTimelineJSON string  `json:"emotionTimelineJson" d:"[]"`
 }
+
+// LogReadingGazeReq stores one labelled Reading View paragraph window (webcam gaze features + label).
+// Labels come from the designed calibration lesson (designed_stimulus) or from a random self-report prompt
+// (self_report). These rows are the training data of ml/07_train_gaze_branch.py; raw gaze never leaves the browser.
+type LogReadingGazeReq struct {
+	g.Meta                `path:"/student/confusion/reading-gaze" method:"post" tags:"Confusion CV & ML" summary:"Lưu mẫu đọc có nhãn (đặc trưng mắt theo đoạn + nhãn thiết kế hoặc tự báo cáo) để huấn luyện nhánh gaze của SP-BEF"`
+	CourseID              int64   `json:"courseId"`
+	LessonID              int64   `json:"lessonId" v:"required"`
+	ParagraphIndex        int     `json:"paragraphIndex" v:"min:0"`
+	LabelSource           string  `json:"labelSource" v:"required|in:designed_stimulus,self_report"`
+	StimulusType          string  `json:"stimulusType"`
+	SelfReportLevel       int     `json:"selfReportLevel" v:"between:0,4"`
+	PromptProbability     float64 `json:"promptProbability"`
+	DwellRatio            float64 `json:"dwellRatio"`
+	RereadCount           float64 `json:"rereadCount"`
+	ParaRegressionRate    float64 `json:"paraRegressionRate"`
+	SweepRatio            float64 `json:"sweepRatio"`
+	GazeTransitionEntropy float64 `json:"gazeTransitionEntropy"`
+	SaccadeRate           float64 `json:"saccadeRate"`
+	RGaze                 float64 `json:"rGaze"`
+	LLRGaze               float64 `json:"llrGaze"`
+	CalibrationErrorNorm  float64 `json:"calibrationErrorNorm"`
+	TextDifficulty        float64 `json:"textDifficulty"`
+	WordCount             int     `json:"wordCount"`
+	ReadingWpm            float64 `json:"readingWpm"`
+	PosteriorProb         float64 `json:"posteriorProb"`
+}
+
+type LogReadingGazeRes struct {
+	ID int64 `json:"id"`
+}
+
 type LogConfusionSessionRes struct {
 	Log        *entity.ConfusionLog  `json:"log"`
 	SelfReport *entity.SelfReportLog `json:"selfReport,omitempty"`

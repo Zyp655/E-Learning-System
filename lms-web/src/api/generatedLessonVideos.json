@@ -1,0 +1,132 @@
+{
+  "501": {
+    "videoUrl": "/videos/lessons/501.mp4",
+    "captionsUrl": "/videos/lessons/501.vtt",
+    "durationSeconds": 162,
+    "voice": "Linh",
+    "segments": [
+      {
+        "segmentIndex": 1,
+        "startTimestamp": 0,
+        "endTimestamp": 54,
+        "transcript": "[00:00] Chào các bạn, chào mừng đến với bài một chấm một của khoá Lập trình Python cơ bản. [00:06] Trong phần này, chúng ta làm quen với biến và các kiểu dữ liệu. [00:11] Trong Python, biến được tạo ngay khi ta gán giá trị cho nó bằng dấu bằng, không cần khai báo kiểu trước. [00:19] Hãy nhìn đoạn code trên màn hình. [00:21] Biến name giữ chuỗi An, nên có kiểu str. [00:25] Biến age giữ số mười chín, là số nguyên, kiểu int. [00:29] Biến height giữ số một phẩy sáu tám, là số thực, kiểu float. [00:34] Python tự suy ra kiểu từ giá trị, và hàm type cho ta biết kiểu đó. [00:39] Vì vậy dòng print cuối cùng in ra int, float và str. [00:44] Một biến cũng có thể được gán lại sang giá trị kiểu khác, vì kiểu gắn với giá trị chứ không gắn với tên biến."
+      },
+      {
+        "segmentIndex": 2,
+        "startTimestamp": 54,
+        "endTimestamp": 108,
+        "transcript": "[00:54] Tiếp theo là các toán tử số học. [00:57] Ngoài cộng, trừ, nhân, chia, Python có thêm ba toán tử rất hay dùng. [01:03] Hai dấu gạch chéo là phép chia lấy phần nguyên, nên bảy chia nguyên cho hai bằng ba. [01:09] Dấu phần trăm là phép chia lấy dư, bảy chia hai dư một. [01:13] Hai dấu sao là luỹ thừa, hai mũ mười bằng một nghìn không trăm hai mươi tư. [01:19] Khi cần đổi kiểu dữ liệu, ta dùng các hàm int, float và str. [01:24] Ví dụ int của chuỗi bốn mươi hai cho số bốn mươi hai, cộng thêm một được bốn mươi ba. [01:31] Hãy chú ý hai điều. [01:33] Thứ nhất, int của ba phẩy chín cho kết quả ba, vì int cắt bỏ phần thập phân chứ không làm tròn. [01:40] Thứ hai, int của chuỗi bốn phẩy hai sẽ báo lỗi, vì chuỗi đó không phải số nguyên."
+      },
+      {
+        "segmentIndex": 3,
+        "startTimestamp": 108,
+        "endTimestamp": 162,
+        "transcript": "[01:48] Phần cuối của bài là nhập và xuất dữ liệu. [01:51] Hàm input dừng chương trình, hiện lời nhắc và chờ người dùng gõ. [01:56] Điều quan trọng nhất cần nhớ là input luôn trả về một chuỗi, kể cả khi người dùng gõ một con số. [02:04] Vì vậy ở dòng thứ hai, ta bọc input trong hàm int để có năm sinh dạng số, rồi mới tính toán được. [02:12] Để in kết quả, ta dùng f-string, tức là chuỗi có chữ f đứng trước. [02:17] Bên trong cặp ngoặc nhọn, ta có thể đặt tên biến hoặc cả một biểu thức, như hai nghìn không trăm hai mươi sáu trừ năm sinh, và Python sẽ thay vào giá trị tương ứng. [02:29] Cách viết này ngắn gọn và dễ đọc hơn nhiều so với nối chuỗi bằng dấu cộng. [02:34] Bài học đến đây là hết, hẹn gặp lại các bạn ở bài đọc về câu lệnh điều kiện."
+      }
+    ]
+  },
+  "504": {
+    "videoUrl": "/videos/lessons/504.mp4",
+    "captionsUrl": "/videos/lessons/504.vtt",
+    "durationSeconds": 138,
+    "voice": "Linh",
+    "segments": [
+      {
+        "segmentIndex": 1,
+        "startTimestamp": 0,
+        "endTimestamp": 46,
+        "transcript": "[00:00] Chào các bạn, bài này nói về vòng lặp. [00:03] Vòng lặp for duyệt lần lượt từng phần tử của một dãy. [00:07] Để lặp qua một dãy số, ta dùng hàm range. [00:11] Range với một tham số stop sinh các số từ không đến stop trừ một. [00:16] Range với hai tham số start và stop thì bắt đầu từ start. [00:21] Tham số thứ ba là bước nhảy. [00:23] Điểm dễ nhầm nhất là giá trị stop không bao giờ nằm trong dãy, nên range từ một đến sáu chỉ cho các số từ một đến năm. [00:32] Trong đoạn code trên màn hình, biến total bắt đầu bằng không, mỗi vòng lặp cộng thêm i, nên kết quả in ra là mười lăm, chính là tổng các số từ một đến năm."
+      },
+      {
+        "segmentIndex": 2,
+        "startTimestamp": 46,
+        "endTimestamp": 94,
+        "transcript": "[00:46] Vòng lặp while lặp chừng nào điều kiện còn đúng. [00:50] Nó phù hợp khi ta chưa biết trước phải lặp bao nhiêu lần. [00:54] Hãy theo dõi đoạn code. [00:56] Ban đầu n bằng mười và count bằng không. [00:59] Mỗi vòng, n được chia nguyên cho hai và count tăng thêm một. [01:03] Giá trị của n lần lượt là mười, năm, hai, rồi một. [01:08] Khi n bằng một, điều kiện n lớn hơn một trở thành sai, vòng lặp dừng và count bằng ba. [01:15] Nếu trong thân vòng lặp không có lệnh nào làm thay đổi điều kiện, chương trình sẽ lặp mãi mãi, gọi là vòng lặp vô hạn. [01:23] Ngoài ra, lệnh break thoát ngay khỏi vòng lặp, còn lệnh continue bỏ qua phần còn lại của lượt hiện tại để sang lượt kế tiếp."
+      },
+      {
+        "segmentIndex": 3,
+        "startTimestamp": 94,
+        "endTimestamp": 138,
+        "transcript": "[01:34] Vòng lặp có thể lồng vào nhau. [01:37] Ví dụ để in bảng cửu chương, ta cần một vòng cho số bị nhân và một vòng bên trong cho số nhân. [01:44] Một tình huống rất thường gặp khác là cần cả vị trí lẫn giá trị của từng phần tử. [01:50] Thay vì tự tạo biến đếm, hãy dùng hàm enumerate. [01:55] Enumerate trả về từng cặp gồm chỉ số và phần tử. [02:00] Tham số start bằng một cho phép đánh số bắt đầu từ một thay vì không. [02:05] Vì vậy đoạn code trên màn hình in ra một cam, hai táo, ba xoài. [02:11] Bài sau chúng ta sẽ học cách gói các đoạn xử lý này vào trong hàm."
+      }
+    ]
+  },
+  "508": {
+    "videoUrl": "/videos/lessons/508.mp4",
+    "captionsUrl": "/videos/lessons/508.vtt",
+    "durationSeconds": 137,
+    "voice": "Linh",
+    "segments": [
+      {
+        "segmentIndex": 1,
+        "startTimestamp": 0,
+        "endTimestamp": 44,
+        "transcript": "[00:00] Chào các bạn, bài này giới thiệu bốn cấu trúc dữ liệu có sẵn của Python, bắt đầu với list. [00:07] List là một dãy có thứ tự và có thể thay đổi. [00:11] Phần tử đầu tiên có chỉ số không. [00:14] Chỉ số âm đếm từ cuối, nên a tại chỉ số trừ một là phần tử cuối cùng. [00:20] Cú pháp cắt lát a từ start đến stop lấy các phần tử từ vị trí start đến trước vị trí stop. [00:27] Vì vậy với list từ một đến năm, a cắt từ một đến bốn cho hai, ba, bốn. [00:34] Phương thức append thêm một phần tử vào cuối list, và hàm len cho biết số phần tử, ở đây là sáu."
+      },
+      {
+        "segmentIndex": 2,
+        "startTimestamp": 44,
+        "endTimestamp": 87,
+        "transcript": "[00:44] Cấu trúc thứ hai là dictionary, hay dict. [00:48] Dict lưu các cặp khoá và giá trị, cho phép tra cứu rất nhanh theo khoá. [00:53] Trong ví dụ, scores ánh xạ tên sinh viên sang điểm. [00:57] Gán scores tại khoá Chi bằng chín sẽ thêm một cặp mới. [01:02] Nếu truy cập bằng dấu ngoặc vuông với một khoá không tồn tại, Python báo lỗi KeyError. [01:08] Để an toàn, hãy dùng phương thức get kèm giá trị mặc định. [01:13] Lời gọi get với khoá Dũng và mặc định không sẽ trả về không, vì Dũng chưa có trong dict. [01:19] Để duyệt cả khoá và giá trị cùng lúc, ta lặp qua scores chấm items."
+      },
+      {
+        "segmentIndex": 3,
+        "startTimestamp": 87,
+        "endTimestamp": 137,
+        "transcript": "[01:27] Hai cấu trúc cuối là tuple và set. [01:30] Tuple giống list nhưng không thể thay đổi sau khi tạo, rất hợp để biểu diễn một bản ghi cố định như toạ độ x, y. [01:39] Set là tập hợp không có thứ tự và không chứa phần tử trùng. [01:44] Trong ví dụ, tập tags có hai lần chữ python nhưng chỉ được giữ một lần, nên len bằng hai. [01:51] Set hỗ trợ các phép toán tập hợp: [01:53] dấu và cho phần giao, dấu gạch đứng cho phần hợp, dấu trừ cho phần hiệu. [01:59] Với a là một, hai, ba và b là hai, ba, bốn, phần giao là hai, ba, còn phần hợp là một, hai, ba, bốn. [02:10] Như vậy bạn đã nắm đủ bốn cấu trúc dữ liệu cơ bản của Python."
+      }
+    ]
+  },
+  "601": {
+    "videoUrl": "/videos/lessons/601.mp4",
+    "captionsUrl": "/videos/lessons/601.vtt",
+    "durationSeconds": 138,
+    "voice": "Linh",
+    "segments": [
+      {
+        "segmentIndex": 1,
+        "startTimestamp": 0,
+        "endTimestamp": 52,
+        "transcript": "[00:00] Chào các bạn, chào mừng đến với khoá Lập trình Web với JavaScript. [00:06] Trong JavaScript hiện đại, ta khai báo biến bằng let hoặc const. [00:11] Let dùng cho biến có thể gán lại, const dùng cho biến không gán lại. [00:16] Nên tránh từ khoá var cũ vì phạm vi của nó khó lường. [00:20] Một điểm rất hay bị hiểu nhầm là const chỉ cấm gán lại tên biến, chứ không làm cho mảng hay object trở nên bất biến. [00:29] Vì vậy trong đoạn code, scores được khai báo bằng const nhưng lệnh scores chấm push mười vẫn hợp lệ. [00:36] Các kiểu nguyên thuỷ của JavaScript gồm number, string, boolean, undefined, null, bigint và symbol, và toán tử typeof cho biết kiểu của một giá trị."
+      },
+      {
+        "segmentIndex": 2,
+        "startTimestamp": 52,
+        "endTimestamp": 95,
+        "transcript": "[00:52] Phần này nói về phép so sánh. [00:55] Toán tử hai dấu bằng so sánh sau khi tự ép kiểu, nên số không so với chuỗi rỗng lại cho kết quả true. [01:02] Điều này gây ra rất nhiều lỗi khó phát hiện. [01:06] Toán tử ba dấu bằng so sánh cả kiểu lẫn giá trị, nên số không so với chuỗi rỗng bằng ba dấu bằng cho false. [01:14] Quy tắc đơn giản là luôn dùng ba dấu bằng. [01:17] Ép kiểu ngầm cũng xảy ra với phép cộng. [01:20] Khi một vế là chuỗi, dấu cộng sẽ nối chuỗi, nên chuỗi năm cộng một cho chuỗi năm một. [01:27] Ngược lại, phép trừ luôn ép về số, nên chuỗi năm trừ một cho số bốn."
+      },
+      {
+        "segmentIndex": 3,
+        "startTimestamp": 95,
+        "endTimestamp": 138,
+        "transcript": "[01:35] Cuối cùng là hàm. [01:37] Ta có thể khai báo hàm bằng từ khoá function, như hàm add trả về a cộng b. [01:43] Cách viết thứ hai là hàm mũi tên, gọn hơn. [01:47] Khi thân hàm mũi tên chỉ là một biểu thức, giá trị của biểu thức được trả về tự động mà không cần return, như hàm square trả về x nhân x. [01:57] Nhưng nếu bạn đặt thân hàm trong cặp ngoặc nhọn, thì phải viết return rõ ràng, nếu không hàm sẽ trả về undefined. [02:06] Vì vậy dòng console chấm log cuối cùng in ra năm và mười sáu. [02:11] Bài sau chúng ta sẽ dùng hàm mũi tên rất nhiều khi xử lý mảng."
+      }
+    ]
+  },
+  "604": {
+    "videoUrl": "/videos/lessons/604.mp4",
+    "captionsUrl": "/videos/lessons/604.vtt",
+    "durationSeconds": 139,
+    "voice": "Linh",
+    "segments": [
+      {
+        "segmentIndex": 1,
+        "startTimestamp": 0,
+        "endTimestamp": 43,
+        "transcript": "[00:00] Chào các bạn, bài này nói về DOM. [00:04] DOM là cây các đối tượng mà trình duyệt tạo ra từ trang HTML, và JavaScript đọc hay sửa trang web thông qua cây này. [00:14] Hàm document chấm querySelector nhận một CSS selector và trả về phần tử khớp đầu tiên, hoặc null nếu không tìm thấy. [00:24] Vì vậy trước khi dùng kết quả, hãy kiểm tra nó khác null. [00:29] Hàm querySelectorAll trả về tất cả phần tử khớp dưới dạng một NodeList. [00:35] Trong ví dụ, ta lấy mọi thẻ li và thêm class done cho từng thẻ bằng forEach."
+      },
+      {
+        "segmentIndex": 2,
+        "startTimestamp": 43,
+        "endTimestamp": 94,
+        "transcript": "[00:43] Khi cần thay đổi nội dung một phần tử, ta có hai lựa chọn là textContent và innerHTML. [00:51] textContent đặt nội dung dưới dạng văn bản thuần, còn innerHTML phân tích chuỗi thành HTML. [01:00] Sự khác biệt này rất quan trọng về bảo mật. [01:03] Hãy nhìn ví dụ: [01:05] chuỗi comment chứa một thẻ img có thuộc tính onerror. [01:09] Nếu gán chuỗi này vào innerHTML, trình duyệt tạo ra thẻ img thật và chạy đoạn mã trong onerror. [01:18] Đây là kiểu tấn công gọi là XSS. [01:20] Còn với textContent, chuỗi chỉ hiện ra đúng như chữ, không có gì được thực thi. [01:27] Quy tắc là dữ liệu do người dùng nhập luôn được hiển thị bằng textContent."
+      },
+      {
+        "segmentIndex": 3,
+        "startTimestamp": 94,
+        "endTimestamp": 139,
+        "transcript": "[01:34] Để phản ứng với thao tác của người dùng, ta dùng addEventListener, gắn một hàm xử lý vào sự kiện như click. [01:43] Sự kiện trong DOM có đặc điểm nổi bọt: [01:47] khi bạn bấm vào một nút, sự kiện click lan dần lên các phần tử cha. [01:52] Tận dụng điều này, thay vì gắn sự kiện cho từng nút xoá trong một danh sách dài, ta chỉ gắn một lần ở phần tử list. [02:00] Trong hàm xử lý, event chấm target chấm closest tìm nút xoá gần nhất. [02:06] Nếu có, ta xoá thẻ li chứa nó. [02:09] Kỹ thuật này gọi là uỷ quyền sự kiện, và nó vẫn hoạt động với các phần tử được thêm vào danh sách sau này."
+      }
+    ]
+  }
+}

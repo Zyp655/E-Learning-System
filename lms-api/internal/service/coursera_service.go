@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -716,44 +717,50 @@ type CodingTestCaseResult struct {
 }
 
 type CodingExecutionResult struct {
-	ProblemID             int64                  `json:"problemId"`
-	LessonID              int64                  `json:"lessonId"`
-	Language              string                 `json:"language"`
-	PassedCount           int                    `json:"passedCount"`
-	TotalCount            int                    `json:"totalCount"`
-	Score                 float64                `json:"score"`
-	AllPassed             bool                   `json:"allPassed"`
-	TotalRuntimeMs        int                    `json:"totalRuntimeMs"`
-	Status                string                 `json:"status"` // passed | partial | failed
-	TestResults           []CodingTestCaseResult `json:"testResults"`
-	AITutorHint           string                 `json:"aiTutorHint"`
-	LessonCompleted       bool                   `json:"lessonCompleted"`
-	CourseProgressPercent float64                `json:"courseProgressPercent"`
+	ProblemID             int64                    `json:"problemId"`
+	LessonID              int64                    `json:"lessonId"`
+	Language              string                   `json:"language"`
+	PassedCount           int                      `json:"passedCount"`
+	TotalCount            int                      `json:"totalCount"`
+	Score                 float64                  `json:"score"`
+	AllPassed             bool                     `json:"allPassed"`
+	TotalRuntimeMs        int                      `json:"totalRuntimeMs"`
+	Status                string                   `json:"status"` // passed | partial | failed
+	TestResults           []CodingTestCaseResult   `json:"testResults"`
+	AITutorHint           string                   `json:"aiTutorHint"`
+	LessonCompleted       bool                     `json:"lessonCompleted"`
+	CourseProgressPercent float64                  `json:"courseProgressPercent"`
 	Submission            *entity.CodingSubmission `json:"submission,omitempty"`
 }
 
+// GetCodingProblemForLesson resolves the problem graded by /v1/student/coding/run and /submit. An explicit
+// problemID must exist (404 otherwise): falling back to another problem would grade, and on submit record, the
+// student's code against a different exercise. Without problemID the lesson's own problem is used.
 func (s *LMSDomainService) GetCodingProblemForLesson(ctx context.Context, lessonID, problemID int64) (*entity.CodingProblem, error) {
 	var prob entity.CodingProblem
+	notFound := func() error {
+		return resCode.NotFound.New("Không tìm thấy bài tập lập trình (Coding Problem)")
+	}
 	if problemID > 0 {
-		if err := s.db.WithContext(ctx).First(&prob, problemID).Error; err == nil {
-			return &prob, nil
+		err := s.db.WithContext(ctx).First(&prob, problemID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, notFound()
 		}
+		if err != nil {
+			return nil, resCode.DatabaseFailed.WithError(err)
+		}
+		return &prob, nil
 	}
 	if lessonID > 0 {
-		if err := s.db.WithContext(ctx).Where("lesson_id = ?", lessonID).First(&prob).Error; err == nil {
+		err := s.db.WithContext(ctx).Where("lesson_id = ?", lessonID).First(&prob).Error
+		if err == nil {
 			return &prob, nil
 		}
-		var lesson entity.Lesson
-		if err := s.db.WithContext(ctx).First(&lesson, lessonID).Error; err == nil {
-			if err := s.db.WithContext(ctx).Where("course_id = ?", lesson.CourseID).First(&prob).Error; err == nil {
-				return &prob, nil
-			}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, resCode.DatabaseFailed.WithError(err)
 		}
 	}
-	if err := s.db.WithContext(ctx).First(&prob).Error; err != nil {
-		return nil, resCode.NotFound.New("Không tìm thấy bài tập lập trình (Coding Problem)")
-	}
-	return &prob, nil
+	return nil, notFound()
 }
 
 func (s *LMSDomainService) EvaluateCodingSubmission(ctx context.Context, userID, problemID, lessonID, assignmentID int64, language, code string, isSubmit bool) (*CodingExecutionResult, error) {
@@ -764,9 +771,15 @@ func (s *LMSDomainService) EvaluateCodingSubmission(ctx context.Context, userID,
 	if language == "" {
 		language = prob.Language
 	}
-	if lessonID <= 0 {
-		lessonID = prob.LessonID
+	// The grader only checks constructs of the problem's own language; code in another language would be scored
+	// (and on submit recorded) as if it were that language.
+	if !strings.EqualFold(language, prob.Language) {
+		return nil, resCode.BadRequest.New(fmt.Sprintf("Bài tập này chỉ chấm ngôn ngữ %s", prob.Language))
 	}
+	language = prob.Language
+	// The graded problem's own lesson is the one completed by a passing submit; a client-supplied lessonId that
+	// belongs to another lesson must not mark that lesson as done.
+	lessonID = prob.LessonID
 
 	var pubTests, hidTests []CodingTestCase
 	_ = json.Unmarshal([]byte(prob.PublicTestsJSON), &pubTests)

@@ -69,9 +69,11 @@ func RoleStringToInt(role string) int {
 	}
 }
 
+// CurrentUserID returns the authenticated user's ID, or 0 for guests (no token / invalid payload).
+// Callers that write or read user-specific data must reject 0.
 func CurrentUserID(ctx context.Context) int64 {
 	if ctx == nil {
-		return 3
+		return 0
 	}
 	if v := ctx.Value(AuthorizationKey); v != nil {
 		if payload, ok := v.(*token.Payload); ok && payload != nil && payload.Id > 0 {
@@ -83,7 +85,16 @@ func CurrentUserID(ctx context.Context) int64 {
 			return id
 		}
 	}
-	return 3 // Default demo student ID fallback
+	return 0
+}
+
+// IsAdmin reports whether the authenticated caller has Admin or Super permissions.
+func IsAdmin(ctx context.Context) bool {
+	p := CurrentPayload(ctx)
+	if p == nil {
+		return false
+	}
+	return strings.EqualFold(p.Permissions, PermAdmin) || strings.EqualFold(p.Permissions, PermSuper)
 }
 
 func CurrentPayload(ctx context.Context) *token.Payload {

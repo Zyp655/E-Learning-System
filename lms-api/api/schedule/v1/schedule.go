@@ -31,7 +31,7 @@ type CreateScheduleReq struct {
 	TargetScore     float64 `json:"targetScore" d:"3.6"`
 }
 type CreateScheduleRes struct {
-	Schedule      *entity.Schedule               `json:"schedule"`
+	Schedule      *entity.Schedule              `json:"schedule"`
 	GPACalculator *service.GPACalculationResult `json:"gpaCalculator"`
 }
 
@@ -51,7 +51,7 @@ type UpdateScheduleReq struct {
 	TargetScore     float64 `json:"targetScore"`
 }
 type UpdateScheduleRes struct {
-	Schedule      *entity.Schedule               `json:"schedule"`
+	Schedule      *entity.Schedule              `json:"schedule"`
 	GPACalculator *service.GPACalculationResult `json:"gpaCalculator"`
 }
 
@@ -82,15 +82,15 @@ type JoinClassByCodeRes struct {
 }
 
 type RecordLearningLogReq struct {
-	g.Meta             `path:"/student/learning-log" method:"post" tags:"Schedule & Attendance" summary:"Ghi nhận thời lượng xem video & kết quả quiz cho Điểm danh AI Tự động 23:59"`
-	CourseID           int64   `json:"courseId" v:"required"`
-	LessonID           int64   `json:"lessonId" v:"required"`
-	ClassID            int64   `json:"classId"`
-	WatchSecondsDelta  int     `json:"watchSecondsDelta"`
-	TotalVideoSeconds  int     `json:"totalVideoSeconds"`
-	QuizCompleted      bool    `json:"quizCompleted"`
-	QuizScore          float64 `json:"quizScore"`
-	FaceVerified       bool    `json:"faceVerified" d:"true"`
+	g.Meta            `path:"/student/learning-log" method:"post" tags:"Schedule & Attendance" summary:"Ghi nhận thời lượng xem video & kết quả quiz cho Điểm danh AI Tự động 23:59"`
+	CourseID          int64   `json:"courseId" v:"required"`
+	LessonID          int64   `json:"lessonId" v:"required"`
+	ClassID           int64   `json:"classId"`
+	WatchSecondsDelta int     `json:"watchSecondsDelta"`
+	TotalVideoSeconds int     `json:"totalVideoSeconds"`
+	QuizCompleted     bool    `json:"quizCompleted"`
+	QuizScore         float64 `json:"quizScore"`
+	FaceVerified      bool    `json:"faceVerified" d:"true"`
 }
 type RecordLearningLogRes struct {
 	Log                 *entity.DailyLearningLog `json:"log"`

@@ -39,11 +39,16 @@ Chọn bộ đặc trưng trên **validation**:
 - Nhãn: ASSISTments 2017 confidence(CONFUSED) >= 0.20. Lưu ý: confidence(CONFUSED) is itself a detector output built from interaction features (correctness, attempts, time), so this branch partly re-learns that detector.
 - Test: **AUROC = 0.7846** (95% CI [0.7815, 0.7877]), AUPRC = 0.4476 (luôn-âm = 0.1831), ECE = 0.0222, Brier = 0.1211.
 
-| Ngưỡng nhãn | Base rate | Test AUROC | Test AUPRC |
-| :--- | :--- | :--- | :--- |
-| `th_0.10` | 0.1947 | 0.7846 | 0.4476 |
-| `th_0.40` | 0.1320 | 0.7212 | 0.2376 |
-| `th_0.70` | 0.1320 | 0.7212 | 0.2376 |
+confidence(CONFUSED) chỉ có 13 giá trị rời rạc (0 chiếm 80.7%, giá trị dương nhỏ nhất là 0.3782), nên nhiều ngưỡng cho cùng một cách gán nhãn: 0.10 và 0.20 cho cùng nhãn (base rate 0.1929 trên toàn tập), 0.40 và 0.70 cũng vậy (0.1304). Bảng cũ (`th_0.10`, `th_0.40`, `th_0.70`) vì thế chỉ chứa 2 cách gán nhãn khác nhau chứ không phải 3. Phân tích hiện gộp các ngưỡng theo cách gán nhãn thực tế (`distinct_threshold_labelings` trong `run_sp_bef_pipeline.py`): mỗi dòng là một cách gán nhãn khác nhau, mọi ngưỡng trong khoảng (lo, hi] cho cùng nhãn; cột "Ngưỡng tương đương" liệt kê các ngưỡng 0.10, 0.20, 0.40, 0.70 rơi vào dòng đó, các dòng còn lại là ngưỡng lấy theo phân vị 0.25, 0.50, 0.75 của các giá trị dương.
+
+| Ngưỡng nhãn | Khoảng ngưỡng cùng nhãn | Ngưỡng tương đương | Base rate (train) | Test AUROC | Test AUPRC |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `th_0.1` | (0.0000, 0.3782] | 0.10, 0.20 | 0.1947 | 0.7846 | 0.4476 |
+| `th_0.4` | (0.3782, 0.7143] | 0.40, 0.70 | 0.1320 | 0.7212 | 0.2376 |
+| `th_0.793` | (0.7895, 0.7965] | — | 0.1226 | 0.7112 | 0.2193 |
+| `th_0.8477` | (0.8333, 0.8621] | — | 0.0504 | 0.6109 | 0.0595 |
+
+Ghi chú: bảng này được tính bằng cách chạy lại riêng nhánh quiz (`run_p4_quiz_branch`, cùng seed và cùng chia tách; số liệu chính của nhánh không đổi). `models/sp_bef_params.json` chưa được sinh lại nên khối `threshold_sensitivity` trong đó vẫn giữ 3 mục cũ (`th_0.10`, `th_0.40`, `th_0.70`, hai mục cuối trùng nhau) cho tới lần chạy đầy đủ tiếp theo của pipeline.
 
 ## 3. Fusion — Virtual Learner (bán tổng hợp)
 

@@ -103,10 +103,10 @@ type GetLeaderboardReq struct {
 	Period   string `json:"period" in:"query" d:"weekly"`
 }
 type GetLeaderboardRes struct {
-	Entries      []entity.LeaderboardEntry  `json:"entries"`
-	MyStreak     *entity.UserStreak         `json:"myStreak"`
-	Achievements []entity.UserAchievement   `json:"achievements"`
-	Rooms        []entity.QuizRoom          `json:"rooms"`
+	Entries      []entity.LeaderboardEntry `json:"entries"`
+	MyStreak     *entity.UserStreak        `json:"myStreak"`
+	Achievements []entity.UserAchievement  `json:"achievements"`
+	Rooms        []entity.QuizRoom         `json:"rooms"`
 }
 
 type GetQuizStatisticsReq struct {
@@ -124,5 +124,13 @@ type CreateQuizRoomReq struct {
 	QuestionTimeSeconds int    `json:"questionTimeSeconds" d:"30"`
 }
 type CreateQuizRoomRes struct {
+	Room *entity.QuizRoom `json:"room"`
+}
+
+type JoinQuizRoomReq struct {
+	g.Meta   `path:"/student/quiz/rooms/:roomCode/join" method:"post" tags:"Quiz & Gamification" summary:"Tham gia phòng thi đấu (bắt buộc trước khi mở WebSocket /v1/ws/quiz/:roomCode)"`
+	RoomCode string `json:"roomCode" in:"path" v:"required"`
+}
+type JoinQuizRoomRes struct {
 	Room *entity.QuizRoom `json:"room"`
 }

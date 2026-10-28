@@ -19,6 +19,7 @@ import {
 import PageTitle from '../../components/PageTitle';
 import FilterBar from '../../components/FilterBar';
 import applicationsApi from '../../api/applications';
+import { showApiError } from '../../utils/api';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -37,7 +38,7 @@ export default function TeacherApplications() {
       const res = await applicationsApi.getAll(filters);
       setApplications(res.data || []);
     } catch (e) {
-      message.error('Không thể tải danh sách hồ sơ giảng viên');
+      showApiError(e, 'Không thể tải danh sách hồ sơ giảng viên');
     } finally {
       setLoading(false);
     }
@@ -74,6 +75,8 @@ export default function TeacherApplications() {
       );
       setSelectedApp(null);
       fetchApplications();
+    } catch (e) {
+      showApiError(e, 'lms-api từ chối cập nhật hồ sơ, trạng thái chưa thay đổi');
     } finally {
       setSubmitting(false);
     }
@@ -228,7 +231,7 @@ export default function TeacherApplications() {
               type="info"
               showIcon
               style={{ marginBottom: 16 }}
-              message="Khi phê duyệt, hệ thống sẽ tự động nâng cấp users.role = 1 (Teacher) và mở khóa Teacher Studio cho ứng viên."
+              message="Khi phê duyệt, lms-api đổi users.role thành 'teacher' và mở khóa Teacher Studio cho ứng viên."
             />
 
             <Descriptions bordered column={1} size="small" style={{ marginBottom: 16 }}>

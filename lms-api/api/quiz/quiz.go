@@ -18,4 +18,5 @@ type IQuizV1 interface {
 	GetLeaderboard(ctx context.Context, req *v1.GetLeaderboardReq) (res *v1.GetLeaderboardRes, err error)
 	GetQuizStatistics(ctx context.Context, req *v1.GetQuizStatisticsReq) (res *v1.GetQuizStatisticsRes, err error)
 	CreateQuizRoom(ctx context.Context, req *v1.CreateQuizRoomReq) (res *v1.CreateQuizRoomRes, err error)
+	JoinQuizRoom(ctx context.Context, req *v1.JoinQuizRoomReq) (res *v1.JoinQuizRoomRes, err error)
 }

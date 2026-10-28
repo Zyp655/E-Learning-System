@@ -51,8 +51,8 @@ type TranscribeVideoRes struct {
 
 type ExtractDocumentReq struct {
 	g.Meta   `path:"/teacher/ai/extract-document" method:"post" tags:"Media & RAG" summary:"Trích xuất văn bản từ tài liệu PDF/DOCX & tạo vector nhúng pgvector 1536 chiều"`
-	FileID   int64  `json:"fileId" v:"required"`
-	LessonID int64  `json:"lessonId"`
+	FileID   int64 `json:"fileId" v:"required"`
+	LessonID int64 `json:"lessonId"`
 }
 type ExtractDocumentRes struct {
 	FileID        int64  `json:"fileId"`

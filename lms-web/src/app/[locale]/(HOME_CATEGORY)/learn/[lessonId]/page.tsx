@@ -1,6 +1,6 @@
 'use client';
 
-import React, { use, useEffect, useState } from 'react';
+import React, { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Container } from '../../_components/Container';
@@ -9,6 +9,7 @@ import {
   Badge,
   Button,
   Card,
+  FieldError,
   Input,
   ProgressBar,
   Textarea,
@@ -22,12 +23,17 @@ import { FaceVerificationModals } from '@/features/confusion-cv/FaceVerification
 import { ConfusionInterventionOverlay } from '@/features/ai-tutor/ConfusionInterventionOverlay';
 import { TutorPanel } from '@/features/ai-tutor/TutorPanel';
 import { CodingLabPanel } from '@/features/coding-lab/CodingLabPanel';
+import {
+  GAZE_PARAGRAPH_ATTR,
+  GAZE_STIMULUS_ATTR,
+  ReadingGazeTracker,
+} from '@/features/reading-gaze/ReadingGazeTracker';
 import { CourseGradebookPanel } from '@/features/gradebook/CourseGradebookPanel';
 import { formatSeconds } from '@/lib/utils';
 import { useLearnStore } from '@/store/useLearnStore';
 import { useTutorStore } from '@/store/useTutorStore';
 import { MOCK_COURSES, MOCK_DISCUSSIONS, MOCK_QUIZZES } from '@/api/mockData';
-import { lmsApi } from '@/api';
+import { describeApiError, lmsApi } from '@/api';
 
 export default function LearnLessonPage({
   params,
@@ -74,6 +80,9 @@ export default function LearnLessonPage({
     setAutoplayCountdown(null);
   }, [lesson.id, lesson.type]);
 
+  const readingBodyRef = useRef<HTMLDivElement | null>(null);
+  // Larger text while gaze tracking is on: webcam gaze error is a few degrees, so bigger lines help.
+  const [gazeTrackingActive, setGazeTrackingActive] = useState(false);
   const [rightTab, setRightTab] = useState<
     'tutor' | 'transcript' | 'notes' | 'discussions' | 'gradebook'
   >('tutor');
@@ -86,6 +95,8 @@ export default function LearnLessonPage({
     courseLessons.filter((l) => l.completed).map((l) => l.id),
   );
   const [markingComplete, setMarkingComplete] = useState(false);
+  const [markCompleteError, setMarkCompleteError] = useState<string | null>(null);
+  const [deadlineResetError, setDeadlineResetError] = useState<string | null>(null);
   const [autoplayCountdown, setAutoplayCountdown] = useState<number | null>(null);
 
   // Personalized deadlines state
@@ -96,7 +107,7 @@ export default function LearnLessonPage({
   const [resettingDeadlines, setResettingDeadlines] = useState(false);
 
   // Inline Graded Module Quiz state
-  const activeQuiz = MOCK_QUIZZES[0];
+  const activeQuiz = MOCK_QUIZZES.find((q) => q.id === lesson.quizId) ?? MOCK_QUIZZES[0];
   const quizPassingScore = 80;
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
   const [quizHonorCode, setQuizHonorCode] = useState(false);
@@ -138,12 +149,15 @@ export default function LearnLessonPage({
 
   const handleMarkLessonCompleted = async () => {
     setMarkingComplete(true);
+    setMarkCompleteError(null);
     try {
       await lmsApi.markLessonCompleted(lesson.id);
       if (!completedLessonIds.includes(lesson.id)) {
         setCompletedLessonIds((prev) => [...prev, lesson.id]);
       }
       setAutoplayCountdown(5);
+    } catch (err) {
+      setMarkCompleteError(`Chưa lưu được tiến độ bài học: ${describeApiError(err)}`);
     } finally {
       setMarkingComplete(false);
     }
@@ -151,10 +165,14 @@ export default function LearnLessonPage({
 
   const handleResetDeadlines = async () => {
     setResettingDeadlines(true);
+    setDeadlineResetError(null);
     try {
       const res = await lmsApi.resetCourseDeadlines(parentCourse.id);
       setDeadlineResetToast(res.message);
-      setDeadlineDueDateLabel(res.newDeadlineDate);
+      if (res.newDeadlineDate) setDeadlineDueDateLabel(res.newDeadlineDate);
+    } catch (err) {
+      setDeadlineResetToast(null);
+      setDeadlineResetError(`Không dời được hạn nộp: ${describeApiError(err)}`);
     } finally {
       setResettingDeadlines(false);
     }
@@ -280,6 +298,7 @@ export default function LearnLessonPage({
               ✓ {deadlineResetToast}
             </div>
           )}
+          <FieldError>{deadlineResetError}</FieldError>
         </Card>
 
         {/* Course Lessons Switcher Strip & Multi-Modal Lesson Format Switcher */}
@@ -437,6 +456,7 @@ export default function LearnLessonPage({
                     Hoàn thành & Chuyển bài tiếp (5s)
                   </Button>
                 </div>
+                <FieldError>{markCompleteError}</FieldError>
               </>
             )}
 
@@ -479,11 +499,37 @@ export default function LearnLessonPage({
                   </Button>
                 </div>
 
-                <div className="space-y-5">
+                <ReadingGazeTracker
+                  lessonId={lesson.id}
+                  containerRef={readingBodyRef}
+                  onTrackingChange={setGazeTrackingActive}
+                  onAskTutor={(paragraphText) => {
+                    sendMessage(
+                      `Mình chưa hiểu đoạn này trong bài đọc "${lesson.title}": "${paragraphText}". Bạn giải thích lại dễ hiểu hơn giúp mình?`,
+                      lesson.id,
+                      currentTimeSec,
+                    );
+                    setRightTab('tutor');
+                  }}
+                />
+
+                <div ref={readingBodyRef} className="space-y-5">
                   {readingData.sections.map((sec, idx) => (
                     <div key={idx} className="space-y-2.5">
                       <h3 className="text-sm font-semibold text-primary">{sec.heading}</h3>
-                      <p className="text-sm leading-relaxed text-secondary">{sec.body}</p>
+                      <p
+                        className={
+                          gazeTrackingActive
+                            ? 'text-lg leading-loose text-primary'
+                            : 'text-sm leading-relaxed text-secondary'
+                        }
+                        {...{
+                          [GAZE_PARAGRAPH_ATTR]: idx,
+                          ...(sec.stimulus ? { [GAZE_STIMULUS_ATTR]: sec.stimulus } : {}),
+                        }}
+                      >
+                        {sec.body}
+                      </p>
                       {sec.formula && (
                         <div className="rounded-xl border border-line bg-muted p-3.5">
                           <span className="block text-xs font-semibold uppercase tracking-wider text-secondary">
@@ -531,6 +577,7 @@ export default function LearnLessonPage({
                       : 'Đánh dấu đã hoàn thành (Mark as Completed)'}
                   </Button>
                 </div>
+                <FieldError>{markCompleteError}</FieldError>
               </Card>
             )}
 

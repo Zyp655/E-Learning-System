@@ -9,6 +9,7 @@ import {
   Button,
   ButtonLink,
   Card,
+  FieldError,
   PageHeader,
   ProgressBar,
   SellerInfo,
@@ -23,20 +24,25 @@ import {
 } from '@/components/catalyst/dialog';
 import { CourseGradebookPanel } from '@/features/gradebook/CourseGradebookPanel';
 import { MOCK_COURSES, MOCK_SPECIALIZATIONS } from '@/api/mockData';
-import { lmsApi } from '@/api';
+import { describeApiError, lmsApi } from '@/api';
 
 export default function StudentMyCoursesPage() {
   const [filterTab, setFilterTab] = useState<'all' | 'gradebook' | 'specialization'>('all');
   const [gradebookModalCourseId, setGradebookModalCourseId] = useState<number | null>(null);
   const [resetToast, setResetToast] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
   const [resettingId, setResettingId] = useState<number | null>(null);
   const [selectedGradebookCourseId, setSelectedGradebookCourseId] = useState<number>(1);
 
   const handleResetDeadlines = async (courseId: number) => {
     setResettingId(courseId);
+    setResetError(null);
     try {
       const res = await lmsApi.resetCourseDeadlines(courseId);
       setResetToast(res.message);
+    } catch (err) {
+      setResetToast(null);
+      setResetError(`Không dời được hạn nộp: ${describeApiError(err)}`);
     } finally {
       setResettingId(null);
     }
@@ -54,6 +60,7 @@ export default function StudentMyCoursesPage() {
           ✓ {resetToast}
         </div>
       )}
+      <FieldError>{resetError}</FieldError>
 
       <div className={segmented.list} role="tablist" aria-label="Chế độ xem học phần">
         <button

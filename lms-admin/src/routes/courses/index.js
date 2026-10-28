@@ -45,6 +45,7 @@ import PageTitle from '../../components/PageTitle';
 import FilterBar from '../../components/FilterBar';
 import coursesApi from '../../api/courses';
 import academicApi from '../../api/academic';
+import { showApiError } from '../../utils/api';
 
 const { confirm } = Modal;
 const { Text, Paragraph } = Typography;
@@ -120,6 +121,8 @@ export default function Courses() {
       setCourses(cList || []);
       setReviews(rList || []);
       setDepartments(dList || []);
+    } catch (error) {
+      showApiError(error, 'Không tải được dữ liệu khóa học / đánh giá từ lms-api');
     } finally {
       setLoading(false);
     }
@@ -456,7 +459,12 @@ export default function Courses() {
 
   // --- REVIEW HANDLERS ---
   const handleApproveReview = async (record) => {
-    await coursesApi.moderateReview(record.id, 'approved');
+    try {
+      await coursesApi.moderateReview(record.id, 'approved');
+    } catch (error) {
+      showApiError(error, 'Không duyệt được đánh giá');
+      return;
+    }
     message.success('Đã duyệt hiển thị đánh giá');
     fetchData();
   };
@@ -468,7 +476,12 @@ export default function Courses() {
       okType: 'danger',
       cancelText: 'Hủy',
       onOk: async () => {
-        await coursesApi.deleteReview(record.id);
+        try {
+          await coursesApi.deleteReview(record.id);
+        } catch (error) {
+          showApiError(error, 'lms-api từ chối xóa đánh giá');
+          return;
+        }
         message.success('Đã xóa đánh giá');
         fetchData();
       },

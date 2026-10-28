@@ -1,0 +1,76 @@
+WEBVTT
+
+00:00:00.600 --> 00:00:03.451
+Chào các bạn, bài này nói về vòng lặp.
+
+00:00:03.801 --> 00:00:07.452
+Vòng lặp for duyệt lần lượt từng phần tử của một dãy.
+
+00:00:07.802 --> 00:00:11.187
+Để lặp qua một dãy số, ta dùng hàm range.
+
+00:00:11.537 --> 00:00:16.338
+Range với một tham số stop sinh các số từ không đến stop trừ một.
+
+00:00:16.688 --> 00:00:20.966
+Range với hai tham số start và stop thì bắt đầu từ start.
+
+00:00:21.316 --> 00:00:23.431
+Tham số thứ ba là bước nhảy.
+
+00:00:23.781 --> 00:00:32.283
+Điểm dễ nhầm nhất là giá trị stop không bao giờ nằm trong dãy, nên range từ một đến sáu chỉ cho các số từ một đến năm.
+
+00:00:32.633 --> 00:00:43.798
+Trong đoạn code trên màn hình, biến total bắt đầu bằng không, mỗi vòng lặp cộng thêm i, nên kết quả in ra là mười lăm, chính là tổng các số từ một đến năm.
+
+00:00:46.600 --> 00:00:49.729
+Vòng lặp while lặp chừng nào điều kiện còn đúng.
+
+00:00:50.079 --> 00:00:53.924
+Nó phù hợp khi ta chưa biết trước phải lặp bao nhiêu lần.
+
+00:00:54.274 --> 00:00:55.813
+Hãy theo dõi đoạn code.
+
+00:00:56.163 --> 00:00:58.920
+Ban đầu n bằng mười và count bằng không.
+
+00:00:59.270 --> 00:01:03.409
+Mỗi vòng, n được chia nguyên cho hai và count tăng thêm một.
+
+00:01:03.759 --> 00:01:08.363
+Giá trị của n lần lượt là mười, năm, hai, rồi một.
+
+00:01:08.713 --> 00:01:15.084
+Khi n bằng một, điều kiện n lớn hơn một trở thành sai, vòng lặp dừng và count bằng ba.
+
+00:01:15.434 --> 00:01:23.401
+Nếu trong thân vòng lặp không có lệnh nào làm thay đổi điều kiện, chương trình sẽ lặp mãi mãi, gọi là vòng lặp vô hạn.
+
+00:01:23.751 --> 00:01:32.339
+Ngoài ra, lệnh break thoát ngay khỏi vòng lặp, còn lệnh continue bỏ qua phần còn lại của lượt hiện tại để sang lượt kế tiếp.
+
+00:01:34.600 --> 00:01:36.870
+Vòng lặp có thể lồng vào nhau.
+
+00:01:37.220 --> 00:01:44.157
+Ví dụ để in bảng cửu chương, ta cần một vòng cho số bị nhân và một vòng bên trong cho số nhân.
+
+00:01:44.507 --> 00:01:50.167
+Một tình huống rất thường gặp khác là cần cả vị trí lẫn giá trị của từng phần tử.
+
+00:01:50.517 --> 00:01:55.023
+Thay vì tự tạo biến đếm, hãy dùng hàm enumerate.
+
+00:01:55.373 --> 00:01:59.855
+Enumerate trả về từng cặp gồm chỉ số và phần tử.
+
+00:02:00.205 --> 00:02:05.025
+Tham số start bằng một cho phép đánh số bắt đầu từ một thay vì không.
+
+00:02:05.375 --> 00:02:10.652
+Vì vậy đoạn code trên màn hình in ra một cam, hai táo, ba xoài.
+
+00:02:11.002 --> 00:02:15.907
+Bài sau chúng ta sẽ học cách gói các đoạn xử lý này vào trong hàm.

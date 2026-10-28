@@ -107,7 +107,7 @@ type ListTeacherApplicationsRes struct {
 type ReviewTeacherApplicationReq struct {
 	g.Meta     `path:"/admin/teacher-applications/:id/review" method:"put" tags:"Admin" summary:"Phê duyệt hoặc từ chối hồ sơ Giảng viên"`
 	ID         int64  `json:"id" in:"path" v:"required"`
-	Status     string `json:"status" v:"required"` // approved, rejected
+	Status     string `json:"status" v:"required|in:approved,rejected"` // approved, rejected
 	ReviewNote string `json:"reviewNote"`
 }
 type ReviewTeacherApplicationRes struct {
@@ -157,24 +157,71 @@ type ListBulkImportsRes struct {
 }
 
 type GetConfusionSettingsReq struct {
-	g.Meta `path:"/admin/confusion/settings" method:"get" tags:"Admin" summary:"Xem cấu hình ngưỡng AI & Mô hình Phát hiện Bối rối"`
+	g.Meta `path:"/admin/confusion/settings" method:"get" tags:"Admin" summary:"Xem cấu hình ngưỡng AI & tham số SP-BEF hiệu lực (theta_on/off, min_hold, trọng số nhánh, HMM)"`
 }
+
+// ConfusionSettingsView is the settings payload of GET/PUT /admin/confusion/settings.
+type ConfusionSettingsView struct {
+	// Legacy / UI fields (see LegacyFields for the ones the server does not read).
+	MLThreshold             float64 `json:"mlThreshold" dc:"Legacy: not used by SP-BEF (theta_on decides); kept for older clients"`
+	RuleThreshold           float64 `json:"ruleThreshold" dc:"Echoed as ruleThreshold for the client-side hybrid rule score"`
+	SlidingWindowSize       int     `json:"slidingWindowSize" dc:"Legacy: stored only"`
+	CooldownSeconds         int     `json:"cooldownSeconds" dc:"Legacy: stored only (SP-BEF uses cooldown_sec from sp_bef_params.json)"`
+	FaceSimilarityThreshold float64 `json:"faceSimilarityThreshold" dc:"Legacy: stored only"`
+	MaxAbsentChecks         int     `json:"maxAbsentChecks" dc:"Legacy: stored only"`
+	// Effective SP-BEF fusion parameters (sp_bef_params.json with admin overrides applied).
+	ThetaOn         float64 `json:"thetaOn" dc:"Hysteresis on-threshold on the posterior"`
+	ThetaOff        float64 `json:"thetaOff" dc:"Hysteresis off-threshold on the posterior"`
+	MinHoldSec      float64 `json:"minHoldSec" dc:"Seconds the posterior must stay >= thetaOn before intervening"`
+	WFace           float64 `json:"wFace" dc:"Face branch weight (0 disables)"`
+	WBeh            float64 `json:"wBeh" dc:"Behavior branch weight (0 disables)"`
+	WQuiz           float64 `json:"wQuiz" dc:"Quiz branch weight (0 disables)"`
+	HMMKeepConfused float64 `json:"hmmKeepConfused" dc:"HMM probability of staying confused between steps"`
+}
+
+// SPBEFFusionValues are SP-BEF fusion parameter values (used for the shipped defaults).
+type SPBEFFusionValues struct {
+	ThetaOn         float64 `json:"thetaOn"`
+	ThetaOff        float64 `json:"thetaOff"`
+	MinHoldSec      float64 `json:"minHoldSec"`
+	WFace           float64 `json:"wFace"`
+	WBeh            float64 `json:"wBeh"`
+	WQuiz           float64 `json:"wQuiz"`
+	HMMKeepConfused float64 `json:"hmmKeepConfused"`
+}
+
 type GetConfusionSettingsRes struct {
-	Settings config.ConfusionConfig `json:"settings"`
+	Settings ConfusionSettingsView `json:"settings"`
+	// SPBEFDefaults are the values shipped in sp_bef_params.json; SPBEFOverrides lists only the overridden fields.
+	SPBEFDefaults  SPBEFFusionValues     `json:"spBefDefaults"`
+	SPBEFOverrides config.SPBEFOverrides `json:"spBefOverrides"`
+	// LegacyFields are accepted and stored but not read by the server.
+	LegacyFields []string `json:"legacyFields"`
+	ModelVersion string   `json:"modelVersion"`
 }
 
 type UpdateConfusionSettingsReq struct {
-	g.Meta                  `path:"/admin/confusion/settings" method:"put" tags:"Admin" summary:"Cập nhật ngưỡng xác suất ML, điểm luật lai, cooldown và ngưỡng khớp khuôn mặt"`
-	MLThreshold             float64 `json:"mlThreshold"`
-	RuleThreshold           float64 `json:"ruleThreshold"`
-	SlidingWindowSize       int     `json:"slidingWindowSize"`
-	CooldownSeconds         int     `json:"cooldownSeconds"`
-	FaceSimilarityThreshold float64 `json:"faceSimilarityThreshold"`
-	MaxAbsentChecks         int     `json:"maxAbsentChecks"`
+	g.Meta `path:"/admin/confusion/settings" method:"put" tags:"Admin" summary:"Cập nhật cấu hình bối rối: tham số SP-BEF (thetaOn, thetaOff, minHoldSec, wFace, wBeh, wQuiz, hmmKeepConfused) và các trường cũ (mlThreshold là legacy)"`
+	// Legacy fields: a value <= 0 (or omitted) keeps the current value.
+	MLThreshold             float64 `json:"mlThreshold" dc:"Legacy, not used by SP-BEF; must be < 1"`
+	RuleThreshold           float64 `json:"ruleThreshold" dc:"<= 100"`
+	SlidingWindowSize       int     `json:"slidingWindowSize" dc:"Legacy, stored only"`
+	CooldownSeconds         int     `json:"cooldownSeconds" dc:"Legacy, stored only"`
+	FaceSimilarityThreshold float64 `json:"faceSimilarityThreshold" dc:"Legacy, stored only; must be <= 1"`
+	MaxAbsentChecks         int     `json:"maxAbsentChecks" dc:"Legacy, stored only"`
+	// SP-BEF overrides: omitted (or null) keeps the current value. Validated against the effective values:
+	// 0 < thetaOff < thetaOn < 1, minHoldSec > 0, weights >= 0 and not all 0, 0 < hmmKeepConfused < 1.
+	ThetaOn         *float64 `json:"thetaOn"`
+	ThetaOff        *float64 `json:"thetaOff"`
+	MinHoldSec      *float64 `json:"minHoldSec"`
+	WFace           *float64 `json:"wFace"`
+	WBeh            *float64 `json:"wBeh"`
+	WQuiz           *float64 `json:"wQuiz"`
+	HMMKeepConfused *float64 `json:"hmmKeepConfused"`
+	// ResetSPBEFOverrides clears every SP-BEF override (back to sp_bef_params.json) before applying the fields above.
+	ResetSPBEFOverrides bool `json:"resetSpBefOverrides"`
 }
-type UpdateConfusionSettingsRes struct {
-	Settings config.ConfusionConfig `json:"settings"`
-}
+type UpdateConfusionSettingsRes = GetConfusionSettingsRes
 
 type GenerateEmbeddingsReq struct {
 	g.Meta `path:"/admin/generate-embeddings" method:"post" tags:"Admin" summary:"Kích hoạt tạo lại vector nhúng pgvector (1536 chiều) toàn hệ thống"`
@@ -443,4 +490,3 @@ type UpdateAdminProctoringViolationReq struct {
 type UpdateAdminProctoringViolationRes struct {
 	Violation *AdminProctoringViolationView `json:"violation"`
 }
-

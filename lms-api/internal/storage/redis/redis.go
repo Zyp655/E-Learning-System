@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	client     *redis.Client
+	client      *redis.Client
 	memFallback sync.Map
 )
 

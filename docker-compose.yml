@@ -59,7 +59,7 @@ services:
       redis:
         condition: service_healthy
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
       SERVER_PORT: 8000
       DB_HOST: postgres
       DB_PORT: 5432

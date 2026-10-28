@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // ESLint runs through `npm run lint` (isolated toolchain in tools/eslint), not inside `next build`.
+  eslint: { ignoreDuringBuilds: true },
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'images.unsplash.com' },

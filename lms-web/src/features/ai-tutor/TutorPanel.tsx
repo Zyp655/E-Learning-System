@@ -182,15 +182,18 @@ export function TutorPanel({ lesson }: TutorPanelProps) {
             return (
               <div
                 key={msg.id}
+                role={msg.isError ? 'alert' : undefined}
                 className={`rounded-xl p-3.5 text-sm ${
-                  isUser ? 'bg-chat-subtle text-primary ml-6' : 'bg-muted text-primary mr-2'
+                  isUser ? 'bg-chat-subtle text-primary ml-6' : msg.isError ? 'bg-danger-50 text-primary mr-2' : 'bg-muted text-primary mr-2'
                 }`}
               >
                 <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-xs text-secondary">
                   <span className="font-semibold text-primary">
                     {isUser
                       ? `${profile.fullName} (Tại mốc ${formatSeconds(msg.videoTimestampSec ?? currentTimeSec)})`
-                      : `AI Tutor · Phong cách ${(msg.persona || persona).toUpperCase()}`}
+                      : msg.isError
+                        ? 'AI Tutor · Không thể trả lời'
+                        : `AI Tutor · Phong cách ${(msg.persona || persona).toUpperCase()}`}
                   </span>
                   <div className="flex items-center gap-1.5">
                     {msg.retrievalTier && <Badge variant="info">{msg.retrievalTier}</Badge>}
@@ -208,7 +211,7 @@ export function TutorPanel({ lesson }: TutorPanelProps) {
                       className="h-28 w-full object-contain"
                     />
                     <div className="bg-gray-900 px-2.5 py-1 text-xs text-white">
-                      Khung hình bài giảng đính kèm qua GPT-4o Vision RAG tại{' '}
+                      Khung hình bài giảng đính kèm tại{' '}
                       {formatSeconds(msg.videoTimestampSec ?? currentTimeSec)}
                     </div>
                   </div>

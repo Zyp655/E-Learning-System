@@ -15,6 +15,13 @@ import type {
   TaskItem,
   TopicSkillStat,
 } from './types';
+import {
+  PROGRAMMING_CODING_CHALLENGES,
+  PROGRAMMING_COURSES,
+  PROGRAMMING_GRADEBOOKS,
+  PROGRAMMING_QUIZZES,
+} from './mockProgrammingCourses';
+import { withGeneratedVideos } from './lessonVideos';
 
 export const MOCK_STUDENT_PROFILE: StudentAcademicProfile = {
   userId: 101,
@@ -31,7 +38,7 @@ export const MOCK_STUDENT_PROFILE: StudentAcademicProfile = {
   cameraConsentGranted: true,
 };
 
-export const MOCK_COURSES: CourseItem[] = [
+const CORE_COURSES: CourseItem[] = [
   {
     id: 1,
     title: 'Học sâu & Thị giác Máy tính Thời gian thực (Deep Learning & Real-Time CV)',
@@ -85,7 +92,7 @@ export const MOCK_COURSES: CourseItem[] = [
             isFreePreview: true,
             orderIndex: 1,
             transcriptStatus: 'ready',
-            videoUrl: '/demo-lecture.mp4',
+            videoUrl: '',
             completed: true,
             summary:
               'Bài giảng phân tích chi tiết kiến trúc kết hợp 478 điểm mốc 3D MediaPipe, chỉ số mở mắt EAR (Eye Aspect Ratio), độ đứng yên ánh nhìn (Gaze Stillness) với mạng BiLSTM 2 lớp có cơ chế Temporal Attention và bộ phân loại đa phương thức 12 đặc trưng.',
@@ -231,7 +238,7 @@ if (mlProbability >= 0.60 || ruleScore >= 35) {
             isFreePreview: false,
             orderIndex: 2,
             transcriptStatus: 'ready',
-            videoUrl: '/demo-lecture.mp4',
+            videoUrl: '',
             completed: true,
             summary: 'Cơ chế trích xuất vector 192 chiều chuẩn hóa L2 từ 3 góc mặt (Thẳng, Trái, Phải) và kiểm tra chống học hộ mỗi 5 giây.',
             attachments: [
@@ -368,6 +375,92 @@ if (mlProbability >= 0.60 || ruleScore >= 35) {
             attachments: [],
             segments: [],
           },
+          {
+            id: 199,
+            moduleId: 11,
+            courseId: 1,
+            title: 'Bài 1.5 [Bài đọc]: Bài đọc hiệu chuẩn theo dõi mắt (thu dữ liệu)',
+            type: 'reading',
+            durationMinutes: 5,
+            durationSeconds: 300,
+            isFreePreview: true,
+            orderIndex: 5,
+            transcriptStatus: 'ready',
+            videoUrl: '',
+            completed: false,
+            summary: 'Bật camera, hiệu chuẩn mắt rồi đọc lần lượt 12 đoạn ngắn với tốc độ bình thường. Một số đoạn được cố ý viết sai hoặc rất chuyên sâu; bạn không cần hiểu hết.',
+            attachments: [],
+            segments: [],
+            readingContent: {
+              estimatedMinutes: 5,
+              sections: [
+                {
+                  heading: 'Đoạn 1',
+                  body: 'Quang hợp là quá trình cây xanh dùng năng lượng ánh sáng mặt trời để biến khí cacbonic và nước thành đường glucozơ, đồng thời giải phóng khí oxy. Phần lớn quá trình này diễn ra trong lục lạp ở tế bào lá, nơi có sắc tố diệp lục giúp hấp thụ ánh sáng.',
+                  stimulus: 'control',
+                },
+                {
+                  heading: 'Đoạn 2',
+                  body: 'Nước sôi ở 100 độ C khi áp suất bằng một atmosphere. Trên đỉnh núi cao, nơi áp suất không khí lớn hơn ở đồng bằng, nước lại sôi ở nhiệt độ thấp hơn, vì vậy người leo núi thường nấu cơm chín nhanh hơn so với khi nấu ở nhà.',
+                  stimulus: 'factual',
+                },
+                {
+                  heading: 'Đoạn 3',
+                  body: 'Xác suất đầu ra của nhánh khuôn mặt được hiệu chỉnh bằng isotonic regression trên tập validation; log-likelihood ratio là hiệu giữa logit của xác suất đã hiệu chỉnh và logit của base rate huấn luyện, rồi được nhân trọng số tin cậy trước khi cộng vào bước lọc tiến của HMM hai trạng thái.',
+                  stimulus: 'contextual',
+                },
+                {
+                  heading: 'Đoạn 4',
+                  body: 'Vòng tuần hoàn của nước bắt đầu khi nước ở biển, sông và hồ bốc hơi dưới tác dụng của nhiệt. Hơi nước bay lên cao, gặp lạnh thì ngưng tụ thành mây, sau đó rơi xuống thành mưa và lại chảy về sông, hồ, biển.',
+                  stimulus: 'control',
+                },
+                {
+                  heading: 'Đoạn 5',
+                  body: 'Bệnh nhân nhiễm toan ceton do đái tháo đường với khoảng trống anion tăng cần được bù dịch tinh thể, truyền insulin liều thấp liên tục và theo dõi kali máu chặt chẽ, vì insulin kéo kali vào nội bào có thể gây hạ kali máu nặng.',
+                  stimulus: 'contextual',
+                },
+                {
+                  heading: 'Đoạn 6',
+                  body: 'Hà Nội, thủ đô của Việt Nam, nằm bên bờ sông Mê Kông. Ngay giữa trung tâm thành phố là Vịnh Hạ Long với hàng nghìn đảo đá vôi, nên du khách có thể đi bộ từ Hồ Gươm ra vịnh chỉ trong vài phút.',
+                  stimulus: 'factual',
+                },
+                {
+                  heading: 'Đoạn 7',
+                  body: 'Hà Nội là thủ đô của Việt Nam và nằm bên bờ sông Hồng. Trung tâm thành phố có Hồ Hoàn Kiếm, khu phố cổ với nhiều con phố mang tên các nghề thủ công truyền thống như Hàng Bạc, Hàng Đào, Hàng Mã.',
+                  stimulus: 'control',
+                },
+                {
+                  heading: 'Đoạn 8',
+                  body: 'Cơ thể người trưởng thành có khoảng 206 chiếc xương. Trong đó xương đùi là xương nhỏ nhất, còn xương bàn đạp nằm sâu trong tai giữa là xương dài và chắc nhất, giúp chúng ta đứng thẳng và chạy nhảy.',
+                  stimulus: 'factual',
+                },
+                {
+                  heading: 'Đoạn 9',
+                  body: 'Theo hiện tượng học của Husserl, epoché là sự treo lửng thái độ tự nhiên để khảo sát cấu trúc ý hướng của ý thức; noesis và noema là hai cực tương quan của mọi hành vi ý hướng, trong đó noema không đồng nhất với đối tượng thực.',
+                  stimulus: 'contextual',
+                },
+                {
+                  heading: 'Đoạn 10',
+                  body: 'Mặt Trăng tự phát ra ánh sáng của chính nó giống như Mặt Trời. Vì vậy vào đêm trăng non, khi Mặt Trăng nằm giữa Trái Đất và Mặt Trời, ta thấy Mặt Trăng tròn và sáng rõ nhất trong tháng.',
+                  stimulus: 'factual',
+                },
+                {
+                  heading: 'Đoạn 11',
+                  body: 'Thói quen đọc sách mỗi ngày giúp mở rộng vốn từ và rèn khả năng tập trung. Chỉ cần dành khoảng mười lăm phút trước khi ngủ, sau vài tháng người đọc thường thấy mình đọc nhanh hơn và nhớ nội dung lâu hơn.',
+                  stimulus: 'control',
+                },
+                {
+                  heading: 'Đoạn 12',
+                  body: 'Trong hợp đồng hoán đổi lãi suất, một bên trả lãi cố định trên số tiền danh nghĩa và nhận lãi thả nổi theo lãi suất tham chiếu; giá trị hợp đồng được định giá bằng chiết khấu chênh lệch dòng tiền theo đường cong lợi suất kỳ hạn.',
+                  stimulus: 'contextual',
+                },
+              ],
+              keyTakeaways: [
+                'Các đoạn 2, 6, 8, 10 cố ý chứa thông tin sai hoặc ghép nhầm; các đoạn 3, 5, 9, 12 dùng thuật ngữ chuyên ngành dày đặc.',
+                'Hệ thống chỉ lưu đặc trưng đọc tổng hợp của từng đoạn (thời gian, số lần đọc lại, quay lui), không lưu ảnh hay toạ độ mắt.',
+              ],
+            },
+          },
         ],
       },
       {
@@ -390,7 +483,7 @@ if (mlProbability >= 0.60 || ruleScore >= 35) {
             isFreePreview: false,
             orderIndex: 1,
             transcriptStatus: 'ready',
-            videoUrl: '/demo-lecture.mp4',
+            videoUrl: '',
             completed: false,
             summary: 'Thiết kế kiến trúc truy hồi ngữ cảnh 3 tầng kết hợp chụp khung hình bài giảng trực tiếp từ thẻ video.',
             attachments: [],
@@ -587,7 +680,7 @@ if (mlProbability >= 0.60 || ruleScore >= 35) {
             isFreePreview: true,
             orderIndex: 1,
             transcriptStatus: 'ready',
-            videoUrl: '/demo-lecture.mp4',
+            videoUrl: '',
             completed: true,
             summary: 'Phân tích thuật toán Kahn dựa trên bán bậc vào (in-degree) và ứng dụng kiểm tra điều kiện tiên quyết giữa các môn học.',
             attachments: [
@@ -729,7 +822,7 @@ if (mlProbability >= 0.60 || ruleScore >= 35) {
             isFreePreview: false,
             orderIndex: 1,
             transcriptStatus: 'ready',
-            videoUrl: '/demo-lecture.mp4',
+            videoUrl: '',
             completed: false,
             summary: 'Sử dụng Segment Tree có Lazy Propagation để cập nhật và truy vấn đoạn video có số lượt tua lại/bối rối cao nhất trong O(log N).',
             attachments: [],
@@ -820,7 +913,7 @@ if (mlProbability >= 0.60 || ruleScore >= 35) {
             isFreePreview: true,
             orderIndex: 1,
             transcriptStatus: 'ready',
-            videoUrl: '/demo-lecture.mp4',
+            videoUrl: '',
             completed: true,
             summary: 'Cơ chế khóa hàng không chặn (SKIP LOCKED) giúp hàng chục Goroutine worker cùng lấy job xử lý video mà không xung đột.',
             attachments: [],
@@ -959,7 +1052,7 @@ if (mlProbability >= 0.60 || ruleScore >= 35) {
             isFreePreview: true,
             orderIndex: 1,
             transcriptStatus: 'ready',
-            videoUrl: '/demo-lecture.mp4',
+            videoUrl: '',
             completed: false,
             summary: 'Quy trình chuyển đổi âm thanh bài giảng thành các đoạn văn bản 500 ký tự (overlap 100) và gom thành các phân đoạn 5–7 phút.',
             attachments: [],
@@ -1031,6 +1124,8 @@ if (mlProbability >= 0.60 || ruleScore >= 35) {
     reviews: [],
   },
 ];
+
+export const MOCK_COURSES: CourseItem[] = [...CORE_COURSES, ...withGeneratedVideos(PROGRAMMING_COURSES)];
 
 export const MOCK_SCHEDULES: ScheduleItem[] = [
   {
@@ -1309,7 +1404,7 @@ def train_multimodal_mlp(X_train, y_train):
   },
 ];
 
-export const MOCK_QUIZZES: QuizItem[] = [
+const CORE_QUIZZES: QuizItem[] = [
   {
     id: 301,
     title: 'Đề kiểm tra Thích ứng: Mô hình Phát hiện Bối rối Đa phương thức & Thị giác Máy tính',
@@ -1382,6 +1477,8 @@ export const MOCK_QUIZZES: QuizItem[] = [
     ],
   },
 ];
+
+export const MOCK_QUIZZES: QuizItem[] = [...CORE_QUIZZES, ...PROGRAMMING_QUIZZES];
 
 export const MOCK_TOPIC_SKILLS: TopicSkillStat[] = [
   {
@@ -1709,7 +1806,7 @@ export const MOCK_SPECIALIZATIONS: SpecializationItem[] = [
   },
 ];
 
-export const MOCK_COURSE_GRADEBOOKS: Record<number, CourseGradebook> = {
+const CORE_COURSE_GRADEBOOKS: Record<number, CourseGradebook> = {
   1: {
     courseId: 1,
     passingThreshold: 75,
@@ -1914,299 +2011,226 @@ export const MOCK_COURSE_GRADEBOOKS: Record<number, CourseGradebook> = {
   },
 };
 
-export const MOCK_CODING_CHALLENGES: CodingChallengeItem[] = [
+export const MOCK_COURSE_GRADEBOOKS: Record<number, CourseGradebook> = {
+  ...CORE_COURSE_GRADEBOOKS,
+  ...PROGRAMMING_GRADEBOOKS,
+};
+
+// Core challenges 1..3 are graded by lms-api (BACKEND_CODING_PROBLEMS in ./index.ts). Title, statement, starter
+// code, tests and hint mirror seed.go cp1..cp3 (Python only); codingParity.test.ts fails when they drift apart.
+const CORE_CODING_CHALLENGES: CodingChallengeItem[] = [
   {
     id: 1,
     courseId: 1,
     lessonId: 105,
-    title: 'Lab 1: Tính Tỷ lệ Mở mắt EAR, Hệ số Eye-Lock & Phân loại Bối rối Đa phương thức',
+    title: 'Lab 1: Phát hiện Trạng thái Đờ mắt (Cognitive Eye-Lock) từ Chuỗi EAR & Đỉnh Mũi',
     difficulty: 'medium',
     problemStatement:
-      'Cho độ mở mắt trung bình earAvg, phương sai độ mở mắt earVar trong 10 khung hình, độ dịch chuyển đỉnh mũi noseDriftPx và điểm nhíu mày au4BrowFurrow. Hãy tính hệ số khuếch đại ánh nhìn gazeBoost (bằng 1.6 nếu earAvg > 0.22, earVar < 0.002 và noseDriftPx < 3.5; bằng 1.3 nếu chỉ thỏa mãn noseDriftPx < 3.5; ngược lại bằng 1.0) và xác định trạng thái bối rối isConfused (true nếu au4BrowFurrow * gazeBoost >= 0.65).',
+      'Viết hàm `detect_eye_lock(ear_values, nose_deltas)` nhận vào danh sách chỉ số mở mắt `ear_values` (5 khung hình liên tiếp) và độ dịch chuyển đỉnh mũi `nose_deltas` (pixel). Hàm trả về `True` nếu trung bình EAR > 0.22, phương sai EAR < 0.002 và trung bình độ dịch chuyển mũi < 3.5; ngược lại trả về `False`.',
     constraints: [
-      '0.05 <= earAvg <= 0.45 (Số thực làm tròn 2 chữ số thập phân)',
-      '0.0001 <= earVar <= 0.0500, 0.0 <= noseDriftPx <= 50.0',
-      'Thời gian thực thi mỗi Test Case <= 50ms, độ phức tạp O(1)',
+      'len(ear_values) == len(nose_deltas) == 5, 0.05 <= ear_values[i] <= 0.45',
+      'Phương sai tổng thể: chia cho len(ear_values), không phải len - 1',
+      'Ngôn ngữ chấm: Python 3.11',
     ],
-    keyFormula:
-      'eyeLocked = (earAvg > 0.22) && (earVar < 0.002) && (noseDriftPx < 3.5) => gazeBoost = 1.6; confusedScore = au4BrowFurrow * gazeBoost',
+    keyFormula: 'mean(ear) > 0.22 and var(ear) < 0.002 and mean(nose) < 3.5 => True (Eye-Lock)',
     starterCode: {
-      python: `def evaluate_eye_lock_confusion(ear_avg: float, ear_var: float, nose_drift_px: float, au4_brow: float) -> dict:
-    # 1. Kiểm tra điều kiện Gaze Stillness và Eye-Lock
-    gaze_still = nose_drift_px < 3.5
-    eye_locked = gaze_still and (ear_avg > 0.22) and (ear_var < 0.002)
-    
-    # 2. Tính hệ số khuếch đại gaze_boost
-    gaze_boost = 1.6 if eye_locked else (1.3 if gaze_still else 1.0)
-    
-    # 3. Tính điểm bối rối có trọng số ánh nhìn
-    weighted_score = round(au4_brow * gaze_boost, 3)
-    return {
-        "gazeBoost": gaze_boost,
-        "eyeLocked": eye_locked,
-        "isConfused": weighted_score >= 0.65
-    }`,
-      typescript: `export function evaluateEyeLockConfusion(
-  earAvg: number,
-  earVar: number,
-  noseDriftPx: number,
-  au4Brow: number
-) {
-  const gazeStill = noseDriftPx < 3.5;
-  const eyeLocked = gazeStill && earAvg > 0.22 && earVar < 0.002;
-  const gazeBoost = eyeLocked ? 1.6 : gazeStill ? 1.3 : 1.0;
-  const weightedScore = Number((au4Brow * gazeBoost).toFixed(3));
-  return {
-    gazeBoost,
-    eyeLocked,
-    isConfused: weightedScore >= 0.65,
-  };
-}`,
-      go: `package cv
-
-func EvaluateEyeLockConfusion(earAvg, earVar, noseDriftPx, au4Brow float64) (float64, bool, bool) {
-	gazeStill := noseDriftPx < 3.5
-	eyeLocked := gazeStill && earAvg > 0.22 && earVar < 0.002
-	gazeBoost := 1.0
-	if eyeLocked {
-		gazeBoost = 1.6
-	} else if gazeStill {
-		gazeBoost = 1.3
-	}
-	isConfused := (au4Brow * gazeBoost) >= 0.65
-	return gazeBoost, eyeLocked, isConfused
-}`,
+      python: `def detect_eye_lock(ear_values, nose_deltas):
+    # TODO: 1. Tính trung bình (mean) và phương sai (variance) của ear_values
+    # TODO: 2. Tính trung bình độ lệch đỉnh mũi (mean_nose) từ nose_deltas
+    # TODO: 3. Trả về True nếu mean_ear > 0.22 và var_ear < 0.002 và mean_nose < 3.5
+    mean_ear = sum(ear_values) / len(ear_values)
+    var_ear = sum((x - mean_ear) ** 2 for x in ear_values) / len(ear_values)
+    mean_nose = sum(nose_deltas) / len(nose_deltas)
+    return mean_ear > 0.22 and var_ear < 0.002 and mean_nose < 3.5
+`,
     },
     testCases: [
       {
         id: 1,
-        name: 'Test Case #1: Học sinh đờ mắt nhìn công thức khó (Eye-Lock + AU4 cao)',
-        input: 'earAvg=0.25, earVar=0.0012, noseDriftPx=1.9, au4Brow=0.48',
-        expectedOutput: '{ gazeBoost: 1.6, eyeLocked: true, isConfused: true }',
+        name: 'Test 1: Học sinh đờ mắt nhìn chằm chằm vào công thức (Eye-Lock)',
+        input: 'ear=[0.25, 0.25, 0.26, 0.25, 0.24], nose=[1.2, 1.5, 1.1, 1.4, 1.3]',
+        expectedOutput: 'True',
         isPublic: true,
       },
       {
         id: 2,
-        name: 'Test Case #2: Học sinh tập trung bình thường (Chớp mắt tự nhiên)',
-        input: 'earAvg=0.27, earVar=0.0045, noseDriftPx=6.2, au4Brow=0.18',
-        expectedOutput: '{ gazeBoost: 1.0, eyeLocked: false, isConfused: false }',
+        name: 'Test 2: Học sinh chớp mắt bình thường (Phương sai EAR lớn)',
+        input: 'ear=[0.28, 0.08, 0.29, 0.10, 0.27], nose=[1.5, 1.6, 1.4, 1.5, 1.2]',
+        expectedOutput: 'False',
         isPublic: true,
       },
       {
         id: 3,
-        name: 'Test Case #3: Đầu giữ yên nhưng mắt chớp bình thường (Gaze Still only)',
-        input: 'earAvg=0.26, earVar=0.0038, noseDriftPx=2.4, au4Brow=0.52',
-        expectedOutput: '{ gazeBoost: 1.3, eyeLocked: false, isConfused: true }',
+        name: 'Test 3: Học sinh quay đầu sang chỗ khác (Nose delta >= 3.5px)',
+        input: 'ear=[0.25, 0.25, 0.25, 0.25, 0.25], nose=[6.2, 7.5, 5.8, 6.0, 7.1]',
+        expectedOutput: 'False',
         isPublic: true,
       },
       {
         id: 4,
-        name: 'Test Case #4 (Hidden Edge Case): Mắt nhắm do buồn ngủ (EAR < 0.22)',
-        input: 'earAvg=0.16, earVar=0.0011, noseDriftPx=1.5, au4Brow=0.30',
-        expectedOutput: '{ gazeBoost: 1.3, eyeLocked: false, isConfused: false }',
+        name: 'Hidden Test 4: Ngưỡng biên EAR thấp (Nhắm mắt/Buồn ngủ)',
+        input: 'ear=[0.18, 0.18, 0.19, 0.18, 0.18], nose=[1.0, 1.1, 1.0, 1.2, 1.0]',
+        expectedOutput: 'False',
+        isPublic: false,
+      },
+      {
+        id: 5,
+        name: 'Hidden Test 5: Tập trung cao kèm đờ mắt (Kích hoạt gazeBoost 1.6x)',
+        input: 'ear=[0.23, 0.24, 0.23, 0.24, 0.23], nose=[2.1, 2.0, 2.2, 1.9, 2.1]',
+        expectedOutput: 'True',
         isPublic: false,
       },
     ],
     aiHint:
-      'Gợi ý từ AI Tutor: Hãy kiểm tra kỹ thứ tự ưu tiên giữa `eye_locked` (cần đồng thời cả 3 điều kiện: `nose_drift_px < 3.5`, `ear_avg > 0.22` và `ear_var < 0.002`) trước khi xét trường hợp chỉ có `gaze_still` (`nose_drift_px < 3.5`). Nhớ nhân `au4_brow * gaze_boost` trước khi so sánh với ngưỡng `0.65`!',
+      'Gợi ý từ AI Tutor: Phương sai tổng thể được tính bằng `sum((x - mean_ear)**2 for x in ear_values) / len(ear_values)`. Đừng quên kiểm tra đồng thời cả 3 điều kiện: `mean_ear > 0.22`, `var_ear < 0.002`, và `mean_nose < 3.5`.',
   },
   {
     id: 2,
     courseId: 2,
     lessonId: 203,
-    title: 'Lab 2: Thuật toán Kahn Sắp xếp Tô-pô & Phát hiện Chu trình Tiên quyết trên Đồ thị DAG',
+    title: 'Lab 2: Thuật toán Kahn Sắp xếp Topo (DAG Topological Sort) & Kiểm tra Chu trình',
     difficulty: 'medium',
     problemStatement:
-      'Cho đồ thị có hướng gồm n môn học (đánh số 0..n-1) và danh sách các cạnh điều kiện tiên quyết [u, v] (môn u phải học trước môn v). Hãy cài đặt thuật toán Kahn sử dụng hàng đợi các đỉnh có bán bậc vào bằng 0 để trả về thứ tự học hợp lệ, hoặc trả về mảng rỗng [] nếu đồ thị chứa chu trình.',
+      'Viết hàm `topological_sort_dag(num_nodes, edges)` nhận vào số đỉnh `num_nodes` (đánh số từ `0` đến `num_nodes - 1`) và danh sách cạnh có hướng `[u, v]` (u tiên quyết của v). Sử dụng thuật toán Kahn (mảng `in_degree` và hàng đợi) để trả về danh sách thứ tự Topo. Nếu đồ thị có chu trình, trả về danh sách rỗng `[]`.',
     constraints: [
-      '1 <= n <= 10^4, 0 <= edges.length <= 5 * 10^4',
+      '1 <= num_nodes <= 10^4, 0 <= len(edges) <= 5 * 10^4',
       'Độ phức tạp thời gian: O(V + E), không gian: O(V + E)',
+      'Ngôn ngữ chấm: Python 3.11',
     ],
-    keyFormula: 'inDegree[v] == 0 => push(queue, v); isDAG = (topoOrder.length === n)',
+    keyFormula: 'in_degree[v] == 0 => queue.append(v); có chu trình khi len(order) < num_nodes',
     starterCode: {
       python: `from collections import deque
 
-def topological_sort_kahn(n: int, edges: list[tuple[int, int]]) -> list[int]:
-    indeg = [0] * n
-    adj = [[] for _ in range(n)]
+def topological_sort_dag(num_nodes, edges):
+    in_degree = [0] * num_nodes
+    adj = [[] for _ in range(num_nodes)]
     for u, v in edges:
         adj[u].append(v)
-        indeg[v] += 1
-    q = deque([i for i in range(n) if indeg[i] == 0])
-    order = []
-    while q:
-        u = q.popleft()
-        order.append(u)
-        for nxt in adj[u]:
-            indeg[nxt] -= 1
-            if indeg[nxt] == 0:
-                q.append(nxt)
-    return order if len(order) == n else []`,
-      typescript: `export function topologicalSortKahn(n: number, edges: [number, number][]): number[] {
-  const indeg = new Array(n).fill(0);
-  const adj: number[][] = Array.from({ length: n }, () => []);
-  for (const [u, v] of edges) {
-    adj[u].push(v);
-    indeg[v]++;
-  }
-  const queue: number[] = [];
-  for (let i = 0; i < n; i++) if (indeg[i] === 0) queue.push(i);
-  const order: number[] = [];
-  while (queue.length > 0) {
-    const u = queue.shift()!;
-    order.push(u);
-    for (const nxt of adj[u]) {
-      if (--indeg[nxt] === 0) queue.push(nxt);
-    }
-  }
-  return order.length === n ? order : [];
-}`,
-      go: `package dag
+        in_degree[v] += 1
 
-func TopologicalSortKahn(n int, edges [][2]int) []int {
-	indeg := make([]int, n)
-	adj := make([][]int, n)
-	for _, e := range edges {
-		adj[e[0]] = append(adj[e[0]], e[1])
-		indeg[e[1]]++
-	}
-	q := []int{}
-	for i := 0; i < n; i++ {
-		if indeg[i] == 0 {
-			q = append(q, i)
-		}
-	}
-	order := []int{}
-	for len(q) > 0 {
-		u := q[0]
-		q = q[1:]
-		order = append(order, u)
-		for _, nxt := range adj[u] {
-			indeg[nxt]--
-			if indeg[nxt] == 0 {
-				q = append(q, nxt)
-			}
-		}
-	}
-	if len(order) != n {
-		return []int{}
-	}
-	return order
-}`,
+    queue = deque([i for i in range(num_nodes) if in_degree[i] == 0])
+    order = []
+    while queue:
+        u = queue.popleft()
+        order.append(u)
+        for v in adj[u]:
+            in_degree[v] -= 1
+            if in_degree[v] == 0:
+                queue.append(v)
+
+    return order if len(order) == num_nodes else []
+`,
     },
     testCases: [
       {
         id: 1,
-        name: 'Test Case #1: Đồ thị lộ trình 4 môn chuẩn DAG',
-        input: 'n=4, edges=[[0,1],[0,2],[1,3],[2,3]]',
+        name: 'Test 1: Đồ thị DAG 4 môn học tiên quyết tuyến tính',
+        input: 'num_nodes=4, edges=[[0,1],[1,2],[2,3]]',
         expectedOutput: '[0, 1, 2, 3]',
         isPublic: true,
       },
       {
         id: 2,
-        name: 'Test Case #2: Đồ thị có chu trình phụ thuộc vòng tròn (0 -> 1 -> 2 -> 0)',
-        input: 'n=3, edges=[[0,1],[1,2],[2,0]]',
-        expectedOutput: '[] (Phát hiện chu trình)',
+        name: 'Test 2: Đồ thị DAG rẽ nhánh hình thoi',
+        input: 'num_nodes=4, edges=[[0,1],[0,2],[1,3],[2,3]]',
+        expectedOutput: '[0, 1, 2, 3]',
         isPublic: true,
       },
       {
         id: 3,
-        name: 'Test Case #3: Các môn học độc lập không có cạnh phụ thuộc',
-        input: 'n=3, edges=[]',
-        expectedOutput: '[0, 1, 2]',
+        name: 'Test 3: Đồ thị có chu trình 0 -> 1 -> 2 -> 0',
+        input: 'num_nodes=3, edges=[[0,1],[1,2],[2,0]]',
+        expectedOutput: '[]',
         isPublic: true,
       },
       {
         id: 4,
-        name: 'Test Case #4 (Hidden): Chuỗi phụ thuộc tuyến tính 5 học phần',
-        input: 'n=5, edges=[[0,1],[1,2],[2,3],[3,4]]',
-        expectedOutput: '[0, 1, 2, 3, 4]',
+        name: 'Hidden Test 4: Đồ thị 2 thành phần liên thông độc lập',
+        input: 'num_nodes=4, edges=[[0,2],[1,3]]',
+        expectedOutput: '[0, 1, 2, 3]',
+        isPublic: false,
+      },
+      {
+        id: 5,
+        name: 'Hidden Test 5: Chu trình cục bộ ở nhánh phụ',
+        input: 'num_nodes=4, edges=[[0,1],[1,2],[2,1],[2,3]]',
+        expectedOutput: '[]',
         isPublic: false,
       },
     ],
     aiHint:
-      'Gợi ý từ AI Tutor: Đừng quên kiểm tra điều kiện `len(order) == n` ở cuối hàm! Nếu đồ thị chứa một chu trình con tách biệt, vòng lặp `while` sẽ kết thúc sớm khi hàng đợi rỗng nhưng số đỉnh lấy ra nhỏ hơn `n`.',
+      'Gợi ý từ AI Tutor: Hãy khởi tạo mảng `in_degree = [0] * num_nodes`, tăng `in_degree[v] += 1` cho mỗi cạnh `(u, v)`. Sau khi duyệt BFS, nếu `len(order) < num_nodes` thì đồ thị chắc chắn chứa chu trình và phải trả về `[]`!',
   },
   {
     id: 3,
     courseId: 3,
     lessonId: 303,
-    title: 'Lab 3: Chuẩn hóa Vector L2 & Tính Tương đồng Cosine cho pgvector / Sinh trắc học',
-    difficulty: 'easy',
+    title: 'Lab 3: Bộ Truy xuất Ngữ nghĩa 3-Tier Video RAG (Cosine Similarity & Temporal Boost)',
+    difficulty: 'hard',
     problemStatement:
-      'Cho hai vector thực u và v cùng số chiều d. Hãy chuẩn hóa L2 cả hai vector về độ dài đơn vị ||u||_2 = 1 và tính độ tương đồng Cosine giữa chúng, đồng thời kiểm tra xem có đạt ngưỡng xác thực >= 0.60 hay không.',
+      'Viết hàm `rank_rag_segments(query_vec, segments, current_ts)` tính điểm tương đồng Cosine giữa `query_vec` và mỗi phân đoạn trong `segments`. Nếu `start <= current_ts <= end`, cộng thêm hệ số ưu tiên thời gian `temporal_boost = 0.15`. Trả về `id` của phân đoạn có tổng điểm cao nhất.',
     constraints: [
-      '1 <= d <= 1536, tổng bình phương các phần tử > 0',
-      'Làm tròn độ tương đồng Cosine đến 4 chữ số thập phân',
+      'Mỗi phân đoạn là dict {"id", "start", "end", "vec"}, len(vec) == len(query_vec)',
+      'Tổng bình phương các phần tử của mỗi vector > 0',
+      'Ngôn ngữ chấm: Python 3.11',
     ],
-    keyFormula: 'cos(u, v) = (u · v) / (||u||_2 * ||v||_2)',
+    keyFormula: 'score = (q · v) / (||q||_2 * ||v||_2) + (0.15 nếu start <= current_ts <= end); trả về argmax id',
     starterCode: {
       python: `import math
 
-def verify_cosine_similarity(u: list[float], v: list[float], threshold: float = 0.60) -> dict:
-    dot = sum(a * b for a, b in zip(u, v))
-    norm_u = math.sqrt(sum(a * a for a in u)) or 1e-9
-    norm_v = math.sqrt(sum(b * b for b in v)) or 1e-9
-    sim = round(dot / (norm_u * norm_v), 4)
-    return {"similarity": sim, "verified": sim >= threshold}`,
-      typescript: `export function verifyCosineSimilarity(u: number[], v: number[], threshold = 0.6) {
-  let dot = 0, normU = 0, normV = 0;
-  for (let i = 0; i < u.length; i++) {
-    dot += u[i] * v[i];
-    normU += u[i] * u[i];
-    normV += v[i] * v[i];
-  }
-  const sim = Number((dot / (Math.sqrt(normU || 1e-9) * Math.sqrt(normV || 1e-9))).toFixed(4));
-  return { similarity: sim, verified: sim >= threshold };
-}`,
-      go: `package vector
+def cosine_sim(a, b):
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    return dot / (norm_a * norm_b + 1e-9)
 
-import "math"
-
-func VerifyCosineSimilarity(u, v []float64, threshold float64) (float64, bool) {
-	var dot, normU, normV float64
-	for i := range u {
-		dot += u[i] * v[i]
-		normU += u[i] * u[i]
-		normV += v[i] * v[i]
-	}
-	sim := dot / (math.Sqrt(normU) * math.Sqrt(normV))
-	return sim, sim >= threshold
-}`,
+def rank_rag_segments(query_vec, segments, current_ts):
+    best_id = -1
+    best_score = -1.0
+    for seg in segments:
+        score = cosine_sim(query_vec, seg["vec"])
+        if seg["start"] <= current_ts <= seg["end"]:
+            score += 0.15
+        if score > best_score:
+            best_score = score
+            best_id = seg["id"]
+    return best_id
+`,
     },
     testCases: [
       {
         id: 1,
-        name: 'Test Case #1: Hai vector khuôn mặt cùng một sinh viên (Góc thẳng & nghiêng nhẹ)',
-        input: 'u=[0.8, 0.6, 0.0], v=[0.75, 0.65, 0.1]',
-        expectedOutput: '{ similarity: 0.9923, verified: true }',
+        name: 'Test 1: Khớp ngữ nghĩa kết hợp ưu tiên phân đoạn tại giây 465',
+        input:
+          'query=[1.0, 0.0], segments=[{id:1, start:0, end:330, vec:[0.9, 0.1]}, {id:2, start:330, end:680, vec:[0.88, 0.12]}], current_ts=465',
+        expectedOutput: '2',
         isPublic: true,
       },
       {
         id: 2,
-        name: 'Test Case #2: Hai vector trực giao (Người lạ khác biệt hoàn toàn)',
-        input: 'u=[1.0, 0.0, 0.0], v=[0.0, 1.0, 0.0]',
-        expectedOutput: '{ similarity: 0.0000, verified: false }',
+        name: 'Test 2: Truy xuất ngữ nghĩa thuần túy khi câu hỏi thuộc phân đoạn khác',
+        input:
+          'query=[0.0, 1.0], segments=[{id:1, start:0, end:330, vec:[0.1, 0.99]}, {id:2, start:330, end:680, vec:[0.9, 0.1]}], current_ts=465',
+        expectedOutput: '1',
         isPublic: true,
       },
       {
         id: 3,
-        name: 'Test Case #3: Vector phóng đại tỷ lệ (Kiểm tra tính bất biến chuẩn hóa L2)',
-        input: 'u=[1.0, 2.0, 2.0], v=[5.0, 10.0, 10.0]',
-        expectedOutput: '{ similarity: 1.0000, verified: true }',
-        isPublic: true,
-      },
-      {
-        id: 4,
-        name: 'Test Case #4 (Hidden): Ngưỡng biên xác thực 0.60',
-        input: 'u=[0.6, 0.8, 0.0], v=[1.0, 0.0, 0.0]',
-        expectedOutput: '{ similarity: 0.6000, verified: true }',
+        name: 'Hidden Test 3: Chuẩn hóa L2 với vector độ dài khác nhau',
+        input:
+          'query=[2.0, 2.0], segments=[{id:10, start:0, end:300, vec:[1.0, 1.0]}, {id:20, start:300, end:600, vec:[1.0, 0.0]}], current_ts=150',
+        expectedOutput: '10',
         isPublic: false,
       },
     ],
     aiHint:
-      'Gợi ý từ AI Tutor: Nhớ chia tích vô hướng `dot` cho tích độ dài Euclid `sqrt(normU) * sqrt(normV)` để kết quả bất biến với độ lớn của vector!',
+      "Gợi ý từ AI Tutor: Công thức Cosine Similarity cần chia tích vô hướng `dot` cho tích độ dài chuẩn L2 `norm_a * norm_b`. Đừng quên cộng `+ 0.15` khi `seg['start'] <= current_ts <= seg['end']` để ưu tiên phân đoạn học sinh đang dừng video!",
   },
+];
+
+export const MOCK_CODING_CHALLENGES: CodingChallengeItem[] = [
+  ...CORE_CODING_CHALLENGES,
+  ...PROGRAMMING_CODING_CHALLENGES,
 ];
 
 

@@ -1,0 +1,85 @@
+WEBVTT
+
+00:00:00.600 --> 00:00:06.330
+Chào các bạn, chào mừng đến với bài một chấm một của khoá Lập trình Python cơ bản.
+
+00:00:06.680 --> 00:00:11.099
+Trong phần này, chúng ta làm quen với biến và các kiểu dữ liệu.
+
+00:00:11.449 --> 00:00:18.841
+Trong Python, biến được tạo ngay khi ta gán giá trị cho nó bằng dấu bằng, không cần khai báo kiểu trước.
+
+00:00:19.191 --> 00:00:21.426
+Hãy nhìn đoạn code trên màn hình.
+
+00:00:21.776 --> 00:00:24.836
+Biến name giữ chuỗi An, nên có kiểu str.
+
+00:00:25.186 --> 00:00:29.151
+Biến age giữ số mười chín, là số nguyên, kiểu int.
+
+00:00:29.501 --> 00:00:34.034
+Biến height giữ số một phẩy sáu tám, là số thực, kiểu float.
+
+00:00:34.384 --> 00:00:39.644
+Python tự suy ra kiểu từ giá trị, và hàm type cho ta biết kiểu đó.
+
+00:00:39.994 --> 00:00:44.145
+Vì vậy dòng print cuối cùng in ra int, float và str.
+
+00:00:44.495 --> 00:00:52.058
+Một biến cũng có thể được gán lại sang giá trị kiểu khác, vì kiểu gắn với giá trị chứ không gắn với tên biến.
+
+00:00:54.600 --> 00:00:56.957
+Tiếp theo là các toán tử số học.
+
+00:00:57.307 --> 00:01:03.039
+Ngoài cộng, trừ, nhân, chia, Python có thêm ba toán tử rất hay dùng.
+
+00:01:03.389 --> 00:01:09.003
+Hai dấu gạch chéo là phép chia lấy phần nguyên, nên bảy chia nguyên cho hai bằng ba.
+
+00:01:09.353 --> 00:01:13.504
+Dấu phần trăm là phép chia lấy dư, bảy chia hai dư một.
+
+00:01:13.854 --> 00:01:19.143
+Hai dấu sao là luỹ thừa, hai mũ mười bằng một nghìn không trăm hai mươi tư.
+
+00:01:19.493 --> 00:01:24.332
+Khi cần đổi kiểu dữ liệu, ta dùng các hàm int, float và str.
+
+00:01:24.682 --> 00:01:30.737
+Ví dụ int của chuỗi bốn mươi hai cho số bốn mươi hai, cộng thêm một được bốn mươi ba.
+
+00:01:31.087 --> 00:01:32.812
+Hãy chú ý hai điều.
+
+00:01:33.162 --> 00:01:39.949
+Thứ nhất, int của ba phẩy chín cho kết quả ba, vì int cắt bỏ phần thập phân chứ không làm tròn.
+
+00:01:40.299 --> 00:01:46.261
+Thứ hai, int của chuỗi bốn phẩy hai sẽ báo lỗi, vì chuỗi đó không phải số nguyên.
+
+00:01:48.600 --> 00:01:51.621
+Phần cuối của bài là nhập và xuất dữ liệu.
+
+00:01:51.971 --> 00:01:56.575
+Hàm input dừng chương trình, hiện lời nhắc và chờ người dùng gõ.
+
+00:01:56.925 --> 00:02:03.930
+Điều quan trọng nhất cần nhớ là input luôn trả về một chuỗi, kể cả khi người dùng gõ một con số.
+
+00:02:04.280 --> 00:02:11.926
+Vì vậy ở dòng thứ hai, ta bọc input trong hàm int để có năm sinh dạng số, rồi mới tính toán được.
+
+00:02:12.276 --> 00:02:17.437
+Để in kết quả, ta dùng f-string, tức là chuỗi có chữ f đứng trước.
+
+00:02:17.787 --> 00:02:29.089
+Bên trong cặp ngoặc nhọn, ta có thể đặt tên biến hoặc cả một biểu thức, như hai nghìn không trăm hai mươi sáu trừ năm sinh, và Python sẽ thay vào giá trị tương ứng.
+
+00:02:29.439 --> 00:02:34.232
+Cách viết này ngắn gọn và dễ đọc hơn nhiều so với nối chuỗi bằng dấu cộng.
+
+00:02:34.582 --> 00:02:40.219
+Bài học đến đây là hết, hẹn gặp lại các bạn ở bài đọc về câu lệnh điều kiện.

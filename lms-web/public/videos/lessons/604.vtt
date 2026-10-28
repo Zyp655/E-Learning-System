@@ -1,0 +1,67 @@
+WEBVTT
+
+00:00:00.600 --> 00:00:03.741
+Chào các bạn, bài này nói về DOM.
+
+00:00:04.091 --> 00:00:14.454
+DOM là cây các đối tượng mà trình duyệt tạo ra từ trang HTML, và JavaScript đọc hay sửa trang web thông qua cây này.
+
+00:00:14.804 --> 00:00:24.644
+Hàm document chấm querySelector nhận một CSS selector và trả về phần tử khớp đầu tiên, hoặc null nếu không tìm thấy.
+
+00:00:24.994 --> 00:00:29.319
+Vì vậy trước khi dùng kết quả, hãy kiểm tra nó khác null.
+
+00:00:29.669 --> 00:00:35.342
+Hàm querySelectorAll trả về tất cả phần tử khớp dưới dạng một NodeList.
+
+00:00:35.692 --> 00:00:41.028
+Trong ví dụ, ta lấy mọi thẻ li và thêm class done cho từng thẻ bằng forEach.
+
+00:00:43.600 --> 00:00:51.469
+Khi cần thay đổi nội dung một phần tử, ta có hai lựa chọn là textContent và innerHTML.
+
+00:00:51.819 --> 00:01:00.201
+textContent đặt nội dung dưới dạng văn bản thuần, còn innerHTML phân tích chuỗi thành HTML.
+
+00:01:00.551 --> 00:01:03.515
+Sự khác biệt này rất quan trọng về bảo mật.
+
+00:01:03.865 --> 00:01:05.196
+Hãy nhìn ví dụ:
+
+00:01:05.546 --> 00:01:09.429
+chuỗi comment chứa một thẻ img có thuộc tính onerror.
+
+00:01:09.779 --> 00:01:17.839
+Nếu gán chuỗi này vào innerHTML, trình duyệt tạo ra thẻ img thật và chạy đoạn mã trong onerror.
+
+00:01:18.189 --> 00:01:20.515
+Đây là kiểu tấn công gọi là XSS.
+
+00:01:20.865 --> 00:01:26.830
+Còn với textContent, chuỗi chỉ hiện ra đúng như chữ, không có gì được thực thi.
+
+00:01:27.180 --> 00:01:32.193
+Quy tắc là dữ liệu do người dùng nhập luôn được hiển thị bằng textContent.
+
+00:01:34.600 --> 00:01:43.209
+Để phản ứng với thao tác của người dùng, ta dùng addEventListener, gắn một hàm xử lý vào sự kiện như click.
+
+00:01:43.559 --> 00:01:46.767
+Sự kiện trong DOM có đặc điểm nổi bọt:
+
+00:01:47.117 --> 00:01:52.234
+khi bạn bấm vào một nút, sự kiện click lan dần lên các phần tử cha.
+
+00:01:52.584 --> 00:02:00.637
+Tận dụng điều này, thay vì gắn sự kiện cho từng nút xoá trong một danh sách dài, ta chỉ gắn một lần ở phần tử list.
+
+00:02:00.987 --> 00:02:06.080
+Trong hàm xử lý, event chấm target chấm closest tìm nút xoá gần nhất.
+
+00:02:06.430 --> 00:02:09.393
+Nếu có, ta xoá thẻ li chứa nó.
+
+00:02:09.743 --> 00:02:17.191
+Kỹ thuật này gọi là uỷ quyền sự kiện, và nó vẫn hoạt động với các phần tử được thêm vào danh sách sau này.

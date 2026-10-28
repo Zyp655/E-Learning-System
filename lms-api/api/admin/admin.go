@@ -40,4 +40,7 @@ type IAdminV1 interface {
 	DeleteAdminSegment(ctx context.Context, req *v1.DeleteAdminSegmentReq) (res *v1.DeleteAdminSegmentRes, err error)
 	ListAdminProctoringViolations(ctx context.Context, req *v1.ListAdminProctoringViolationsReq) (res *v1.ListAdminProctoringViolationsRes, err error)
 	UpdateAdminProctoringViolation(ctx context.Context, req *v1.UpdateAdminProctoringViolationReq) (res *v1.UpdateAdminProctoringViolationRes, err error)
+	ListAdminReviews(ctx context.Context, req *v1.ListAdminReviewsReq) (res *v1.ListAdminReviewsRes, err error)
+	DeleteAdminReview(ctx context.Context, req *v1.DeleteAdminReviewReq) (res *v1.DeleteAdminReviewRes, err error)
+	ListAdminSubmissionIntegrity(ctx context.Context, req *v1.ListAdminSubmissionIntegrityReq) (res *v1.ListAdminSubmissionIntegrityRes, err error)
 }

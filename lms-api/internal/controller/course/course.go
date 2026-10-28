@@ -2,9 +2,12 @@ package course
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/hieu/lms-confusion/lms-api/api/course"
 	v1 "github.com/hieu/lms-confusion/lms-api/api/course/v1"
@@ -61,7 +64,9 @@ func (c *ControllerV1) GetPublicCourseDetail(ctx context.Context, req *v1.GetPub
 
 	userID := consts.CurrentUserID(ctx)
 	var enrollCount int64
-	c.svc.DB().WithContext(ctx).Model(&entity.Enrollment{}).Where("user_id = ? AND course_id = ?", userID, req.ID).Count(&enrollCount)
+	if userID > 0 { // public route: guests are never enrolled
+		c.svc.DB().WithContext(ctx).Model(&entity.Enrollment{}).Where("user_id = ? AND course_id = ?", userID, req.ID).Count(&enrollCount)
+	}
 
 	return &v1.GetPublicCourseDetailRes{
 		Course:     &item,
@@ -239,6 +244,10 @@ func (c *ControllerV1) GetLessonSegments(ctx context.Context, req *v1.GetLessonS
 }
 
 func (c *ControllerV1) CreateLessonSegment(ctx context.Context, req *v1.CreateLessonSegmentReq) (res *v1.CreateLessonSegmentRes, err error) {
+	// The route sits in the generic authenticated group, so only the course owner (or an admin) may add segments.
+	if _, err := c.authorizeLesson(ctx, req.ID); err != nil {
+		return nil, err
+	}
 	seg := entity.VideoSegment{
 		LessonID:         req.ID,
 		SegmentOrder:     req.SegmentOrder,
@@ -319,10 +328,15 @@ func (c *ControllerV1) RespondCourseReview(ctx context.Context, req *v1.RespondC
 	if err := c.svc.DB().WithContext(ctx).First(&rev, req.ID).Error; err != nil {
 		return nil, resCode.NotFound.New("Không tìm thấy đánh giá")
 	}
+	if _, err := c.authorizeCourse(ctx, rev.CourseID); err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	rev.TeacherResponse = req.TeacherResponse
 	rev.RespondedAt = &now
-	c.svc.DB().WithContext(ctx).Save(&rev)
+	if err := c.svc.DB().WithContext(ctx).Save(&rev).Error; err != nil {
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
 	return &v1.RespondCourseReviewRes{Review: &rev}, nil
 }
 
@@ -397,10 +411,11 @@ func (c *ControllerV1) CreateCourse(ctx context.Context, req *v1.CreateCourseReq
 }
 
 func (c *ControllerV1) UpdateCourse(ctx context.Context, req *v1.UpdateCourseReq) (res *v1.UpdateCourseRes, err error) {
-	var crs entity.Course
-	if err := c.svc.DB().WithContext(ctx).First(&crs, req.ID).Error; err != nil {
-		return nil, resCode.CourseNotFound.New("Không tìm thấy khóa học")
+	crsPtr, err := c.authorizeCourse(ctx, req.ID)
+	if err != nil {
+		return nil, err
 	}
+	crs := *crsPtr
 	if req.Title != "" {
 		crs.Title = req.Title
 	}
@@ -422,16 +437,30 @@ func (c *ControllerV1) UpdateCourse(ctx context.Context, req *v1.UpdateCourseReq
 	if req.IsPublished != nil {
 		crs.IsPublished = *req.IsPublished
 	}
-	c.svc.DB().WithContext(ctx).Save(&crs)
+	if err := c.svc.DB().WithContext(ctx).Save(&crs).Error; err != nil {
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
 	return &v1.UpdateCourseRes{Course: &crs}, nil
 }
 
 func (c *ControllerV1) DeleteCourse(ctx context.Context, req *v1.DeleteCourseReq) (res *v1.DeleteCourseRes, err error) {
-	c.svc.DB().WithContext(ctx).Delete(&entity.Course{}, req.ID)
+	if _, err := c.authorizeCourse(ctx, req.ID); err != nil {
+		return nil, err
+	}
+	result := c.svc.DB().WithContext(ctx).Delete(&entity.Course{}, req.ID)
+	if result.Error != nil {
+		return nil, resCode.DatabaseFailed.WithError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil, resCode.CourseNotFound.New("Không tìm thấy khóa học")
+	}
 	return &v1.DeleteCourseRes{Success: true}, nil
 }
 
 func (c *ControllerV1) CreateModule(ctx context.Context, req *v1.CreateModuleReq) (res *v1.CreateModuleRes, err error) {
+	if _, err := c.authorizeCourse(ctx, req.CourseID); err != nil {
+		return nil, err
+	}
 	mod := entity.Module{
 		CourseID:    req.CourseID,
 		Title:       req.Title,
@@ -446,10 +475,11 @@ func (c *ControllerV1) CreateModule(ctx context.Context, req *v1.CreateModuleReq
 }
 
 func (c *ControllerV1) UpdateModule(ctx context.Context, req *v1.UpdateModuleReq) (res *v1.UpdateModuleRes, err error) {
-	var mod entity.Module
-	if err := c.svc.DB().WithContext(ctx).First(&mod, req.ID).Error; err != nil {
-		return nil, resCode.ModuleNotFound.New("Không tìm thấy chương học")
+	modPtr, err := c.authorizeModule(ctx, req.ID)
+	if err != nil {
+		return nil, err
 	}
+	mod := *modPtr
 	if req.Title != "" {
 		mod.Title = req.Title
 	}
@@ -459,16 +489,34 @@ func (c *ControllerV1) UpdateModule(ctx context.Context, req *v1.UpdateModuleReq
 	if req.OrderIndex > 0 {
 		mod.OrderIndex = req.OrderIndex
 	}
-	c.svc.DB().WithContext(ctx).Save(&mod)
+	if err := c.svc.DB().WithContext(ctx).Save(&mod).Error; err != nil {
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
 	return &v1.UpdateModuleRes{Module: &mod}, nil
 }
 
 func (c *ControllerV1) DeleteModule(ctx context.Context, req *v1.DeleteModuleReq) (res *v1.DeleteModuleRes, err error) {
-	c.svc.DB().WithContext(ctx).Delete(&entity.Module{}, req.ID)
+	if _, err := c.authorizeModule(ctx, req.ID); err != nil {
+		return nil, err
+	}
+	result := c.svc.DB().WithContext(ctx).Delete(&entity.Module{}, req.ID)
+	if result.Error != nil {
+		return nil, resCode.DatabaseFailed.WithError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil, resCode.ModuleNotFound.New("Không tìm thấy chương học")
+	}
 	return &v1.DeleteModuleRes{Success: true}, nil
 }
 
 func (c *ControllerV1) CreateLesson(ctx context.Context, req *v1.CreateLessonReq) (res *v1.CreateLessonRes, err error) {
+	mod, err := c.authorizeModule(ctx, req.ModuleID)
+	if err != nil {
+		return nil, err
+	}
+	if mod.CourseID != req.CourseID {
+		return nil, resCode.ModuleNotFound.New("Chương học không thuộc khóa học này")
+	}
 	l := entity.Lesson{
 		CourseID:            req.CourseID,
 		ModuleID:            req.ModuleID,
@@ -491,10 +539,11 @@ func (c *ControllerV1) CreateLesson(ctx context.Context, req *v1.CreateLessonReq
 }
 
 func (c *ControllerV1) UpdateLesson(ctx context.Context, req *v1.UpdateLessonReq) (res *v1.UpdateLessonRes, err error) {
-	var l entity.Lesson
-	if err := c.svc.DB().WithContext(ctx).First(&l, req.ID).Error; err != nil {
-		return nil, resCode.LessonNotFound.New("Không tìm thấy bài giảng")
+	lPtr, err := c.authorizeLesson(ctx, req.ID)
+	if err != nil {
+		return nil, err
 	}
+	l := *lPtr
 	if req.Title != "" {
 		l.Title = req.Title
 	}
@@ -522,12 +571,23 @@ func (c *ControllerV1) UpdateLesson(ctx context.Context, req *v1.UpdateLessonReq
 	if req.AllowSkip != nil {
 		l.AllowSkip = *req.AllowSkip
 	}
-	c.svc.DB().WithContext(ctx).Save(&l)
+	if err := c.svc.DB().WithContext(ctx).Save(&l).Error; err != nil {
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
 	return &v1.UpdateLessonRes{Lesson: &l}, nil
 }
 
 func (c *ControllerV1) DeleteLesson(ctx context.Context, req *v1.DeleteLessonReq) (res *v1.DeleteLessonRes, err error) {
-	c.svc.DB().WithContext(ctx).Delete(&entity.Lesson{}, req.ID)
+	if _, err := c.authorizeLesson(ctx, req.ID); err != nil {
+		return nil, err
+	}
+	result := c.svc.DB().WithContext(ctx).Delete(&entity.Lesson{}, req.ID)
+	if result.Error != nil {
+		return nil, resCode.DatabaseFailed.WithError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil, resCode.LessonNotFound.New("Không tìm thấy bài giảng")
+	}
 	return &v1.DeleteLessonRes{Success: true}, nil
 }
 
@@ -604,3 +664,51 @@ func (c *ControllerV1) CompleteReadingLesson(ctx context.Context, req *v1.Comple
 	return &v1.CompleteReadingLessonRes{CompleteReadingResult: out}, nil
 }
 
+// authorizeCourse loads the course and requires the caller to own it (Course.TeacherID) or be an admin.
+func (c *ControllerV1) authorizeCourse(ctx context.Context, courseID int64) (*entity.Course, error) {
+	userID := consts.CurrentUserID(ctx)
+	if userID == 0 {
+		return nil, resCode.TokenMissing.New("Vui lòng đăng nhập")
+	}
+	var crs entity.Course
+	if err := c.svc.DB().WithContext(ctx).First(&crs, courseID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, resCode.CourseNotFound.New("Không tìm thấy khóa học")
+		}
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
+	if crs.TeacherID != userID && !consts.IsAdmin(ctx) {
+		return nil, resCode.PermissionDenied.New("Bạn không phải giảng viên phụ trách khóa học này")
+	}
+	return &crs, nil
+}
+
+// authorizeModule loads the module and requires the caller to own its course (or be an admin).
+func (c *ControllerV1) authorizeModule(ctx context.Context, moduleID int64) (*entity.Module, error) {
+	var mod entity.Module
+	if err := c.svc.DB().WithContext(ctx).First(&mod, moduleID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, resCode.ModuleNotFound.New("Không tìm thấy chương học")
+		}
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
+	if _, err := c.authorizeCourse(ctx, mod.CourseID); err != nil {
+		return nil, err
+	}
+	return &mod, nil
+}
+
+// authorizeLesson loads the lesson and requires the caller to own its course (or be an admin).
+func (c *ControllerV1) authorizeLesson(ctx context.Context, lessonID int64) (*entity.Lesson, error) {
+	var l entity.Lesson
+	if err := c.svc.DB().WithContext(ctx).First(&l, lessonID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, resCode.LessonNotFound.New("Không tìm thấy bài giảng")
+		}
+		return nil, resCode.DatabaseFailed.WithError(err)
+	}
+	if _, err := c.authorizeCourse(ctx, l.CourseID); err != nil {
+		return nil, err
+	}
+	return &l, nil
+}

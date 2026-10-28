@@ -2,7 +2,6 @@ package dto
 
 import (
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -87,63 +86,8 @@ func (p *PaginationDto) GetValue(name string) (interface{}, bool) {
 	return nil, false
 }
 
-func BuildWhere(db *gorm.DB, dto PaginationDto, table string, searchFields []string) *gorm.DB {
-	for _, filter := range dto.Filters {
-		if filter.Name == "" || filter.Value == "" {
-			continue
-		}
-		col := filter.Name
-		if !strings.Contains(filter.Name, ".") && table != "" {
-			col = fmt.Sprintf("%s.%s", table, filter.Name)
-		}
-		db = db.Where(fmt.Sprintf("%s = ?", col), filter.Value)
-	}
-
-	keyword := strings.TrimSpace(dto.Keyword)
-	if keyword != "" && len(searchFields) > 0 {
-		keyword = strings.ToLower(keyword)
-		var clauses []string
-		var args []interface{}
-		for _, field := range searchFields {
-			col := field
-			if !strings.Contains(field, ".") && table != "" {
-				col = fmt.Sprintf("%s.%s", table, field)
-			}
-			clauses = append(clauses, fmt.Sprintf("LOWER(%s) LIKE ?", col))
-			args = append(args, "%"+keyword+"%")
-		}
-		db = db.Where("("+strings.Join(clauses, " OR ")+")", args...)
-	}
-
-	for _, param := range dto.WithinParams {
-		if param.Name == "" || param.From == "" {
-			continue
-		}
-		col := param.Name
-		if !strings.Contains(param.Name, ".") && table != "" {
-			col = fmt.Sprintf("%s.%s", table, param.Name)
-		}
-		if param.To != nil {
-			db = db.Where(fmt.Sprintf("%s BETWEEN ? AND ?", col), param.From, *param.To)
-		} else {
-			db = db.Where(fmt.Sprintf("%s >= ?", col), param.From)
-		}
-	}
-
-	orderDir := strings.ToUpper(dto.OrderDir)
-	if orderDir != "ASC" && orderDir != "DESC" {
-		orderDir = "DESC"
-	}
-	orderBy := dto.OrderBy
-	if orderBy == "" {
-		orderBy = "id"
-	}
-	if !strings.Contains(orderBy, ".") && table != "" {
-		orderBy = fmt.Sprintf("%s.%s", table, orderBy)
-	}
-	db = db.Order(fmt.Sprintf("%s %s", orderBy, orderDir))
-	return db
-}
+// BuildWhere was removed: it interpolated filter/search/order column names from the request into SQL with
+// fmt.Sprintf (SQL injection) and had no callers. Build queries with fixed column names and "?" placeholders.
 
 func Paginate(page, limit int) func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {

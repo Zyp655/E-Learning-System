@@ -1,4 +1,5 @@
 import api from '../utils/api';
+import { isHttpError } from '../utils/httpError';
 import { mockStore } from '../utils/mockData';
 
 export const normalizeSegment = (s = {}) => {
@@ -205,11 +206,11 @@ export const normalizeCourse = (c = {}) => {
 };
 
 export const normalizeReview = (r = {}) => {
-  const courseTitle = r.course_title || r.courseTitle || 'Khóa học Trực tuyến';
-  const userName = r.user_name || r.userName || r.studentName || 'Sinh viên LMS';
-  const teacherResponse = r.teacher_response ?? r.teacherResponse ?? '';
+  const courseTitle = r.course_title || r.courseTitle || '-';
+  const userName = r.user_name || r.userName || r.studentName || r.user?.fullName || '-';
+  const teacherResponse = r.teacher_response ?? r.teacherResponse ?? r.teacherReply ?? '';
   const helpfulCount = Number(r.helpful_count ?? r.helpfulCount ?? 0);
-  const createdAt = r.created_at || r.createdAt || '2026-10-20';
+  const createdAt = r.created_at || r.createdAt || null;
 
   return {
     ...r,
@@ -271,14 +272,19 @@ class CoursesApi {
   };
 
   getCourseById = async (courseId) => {
-    const found = mockStore.courses.find((c) => Number(c.id) === Number(courseId));
-    if (found) return normalizeCourse(found);
+    // lms-api has no GET /v1/admin/courses/:id; GET /v1/admin/courses already returns every course with its
+    // full Modules -> Lessons -> VideoSegments tree, so pick the course from that list.
     try {
-      const res = await api.get(`/v1/admin/courses/${courseId}`);
-      const raw = res?.data?.data || res?.data;
-      if (raw) return normalizeCourse(raw);
-    } catch (e) {}
-    return null;
+      const res = await api.get('/v1/admin/courses');
+      const body = res?.data?.data ?? res?.data;
+      const items = Array.isArray(body) ? body : body?.items ?? body?.courses ?? [];
+      const raw = (Array.isArray(items) ? items : []).find((c) => Number(c.id) === Number(courseId));
+      return raw ? normalizeCourse(raw) : null;
+    } catch (e) {
+      if (isHttpError(e)) throw e;
+    }
+    const found = mockStore.courses.find((c) => Number(c.id) === Number(courseId));
+    return found ? normalizeCourse(found) : null;
   };
 
   createCourse = async (data) => {
@@ -703,13 +709,21 @@ class CoursesApi {
     return { id: segmentId };
   };
 
+  // lms-api GET /v1/admin/reviews -> { items: AdminReviewView[], total }. Reviews have no moderation status in
+  // lms-api (published on creation), so they normalize to status 'approved'.
   getReviews = async (params = {}) => {
     try {
-      const res = await api.get('/v1/admin/reviews', { params });
-      const items = res?.data?.data?.items || res?.data?.data || res?.data;
-      if (Array.isArray(items) && items.length > 0) return items.map(normalizeReview);
-    } catch (e) {}
+      const query = {};
+      if (params.courseId || params.course_id) query.courseId = params.courseId || params.course_id;
+      const res = await api.get('/v1/admin/reviews', { params: query });
+      const body = res?.data?.data ?? res?.data;
+      const items = Array.isArray(body) ? body : body?.items ?? [];
+      return (Array.isArray(items) ? items : []).map(normalizeReview);
+    } catch (e) {
+      if (isHttpError(e)) throw e;
+    }
 
+    // Offline demo mode only.
     let list = mockStore.courseReviews.map(normalizeReview);
     if (params.status) {
       list = list.filter((r) => r.status === params.status);
@@ -717,20 +731,27 @@ class CoursesApi {
     return list;
   };
 
+  // lms-api has no review moderation status (no PUT /v1/admin/reviews/:id), so approval only exists for the
+  // offline demo reviews; real reviews are always shown as approved and only deletion is available.
   moderateReview = async (reviewId, status) => {
-    try {
-      await api.put(`/v1/admin/reviews/${reviewId}`, { status });
-    } catch (e) {}
+    const exists = mockStore.courseReviews.some((r) => r.id === reviewId);
+    if (!exists) {
+      throw new Error('lms-api không hỗ trợ duyệt đánh giá (đánh giá được hiển thị ngay khi tạo)');
+    }
     mockStore.courseReviews = mockStore.courseReviews.map((r) =>
       r.id === reviewId ? normalizeReview({ ...r, status }) : r
     );
     return mockStore.courseReviews.find((r) => r.id === reviewId);
   };
 
+  // lms-api DELETE /v1/admin/reviews/:id.
   deleteReview = async (reviewId) => {
     try {
       await api.delete(`/v1/admin/reviews/${reviewId}`);
-    } catch (e) {}
+      return { id: reviewId };
+    } catch (e) {
+      if (isHttpError(e)) throw e;
+    }
     mockStore.courseReviews = mockStore.courseReviews.filter((r) => r.id !== reviewId);
     return { id: reviewId };
   };

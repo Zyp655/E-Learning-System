@@ -4,11 +4,13 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/hieu/lms-confusion/lms-api/internal/config"
 	"github.com/hieu/lms-confusion/lms-api/internal/storage/redis"
 	resCode "github.com/hieu/lms-confusion/lms-api/utility/resCode"
 )
@@ -36,6 +38,7 @@ type SPBEFFusionConfig struct {
 	WFace           float64 `json:"w_face"`
 	WBeh            float64 `json:"w_beh"`
 	WQuiz           float64 `json:"w_quiz"`
+	WGaze           float64 `json:"w_gaze"`
 	ThetaOn         float64 `json:"theta_on"`
 	ThetaOff        float64 `json:"theta_off"`
 	MinHoldSec      float64 `json:"min_hold_sec"`
@@ -59,12 +62,15 @@ type SPBEFBranchConfig struct {
 	BaseRate     float64   `json:"base_rate"`
 	IsotonicXP   []float64 `json:"isotonic_xp"`
 	IsotonicFP   []float64 `json:"isotonic_fp"`
+	Trained      bool      `json:"trained"`
+	Enabled      bool      `json:"enabled"`
 }
 
 type SPBEFBranches struct {
 	Face     SPBEFBranchConfig `json:"face"`
 	Behavior SPBEFBranchConfig `json:"behavior"`
 	Quiz     SPBEFBranchConfig `json:"quiz"`
+	Gaze     SPBEFBranchConfig `json:"gaze"`
 }
 
 type SPBEFParams struct {
@@ -82,12 +88,15 @@ type SPBEFStepResult struct {
 	LLRFace              float64 `json:"llr_face"`
 	LLRBeh               float64 `json:"llr_beh"`
 	LLRQuiz              float64 `json:"llr_quiz"`
+	LLRGaze              float64 `json:"llr_gaze"`
 	RFace                float64 `json:"r_face"`
 	RBeh                 float64 `json:"r_beh"`
 	RQuiz                float64 `json:"r_quiz"`
+	RGaze                float64 `json:"r_gaze"`
 	ContribFace          float64 `json:"contrib_face"`
 	ContribBeh           float64 `json:"contrib_beh"`
 	ContribQuiz          float64 `json:"contrib_quiz"`
+	ContribGaze          float64 `json:"contrib_gaze"`
 	SegmentPrior         float64 `json:"segment_prior"`
 	HighDurationSec      float64 `json:"high_duration_sec"`
 	IsConfused           bool    `json:"is_confused"`
@@ -142,6 +151,9 @@ type MultimodalFeatures struct {
 	DtSec                float64   `json:"dt_sec,omitempty"`
 	HasFace              bool      `json:"has_face"`
 	HasQuiz              bool      `json:"has_quiz"`
+	HasGaze              bool      `json:"has_gaze"`
+	LLRGaze              float64   `json:"llr_gaze"`
+	RGaze                float64   `json:"r_gaze"`
 	RFace                float64   `json:"r_face"`
 	RBeh                 float64   `json:"r_beh"`
 	RQuiz                float64   `json:"r_quiz"`
@@ -190,12 +202,15 @@ type ConfusionPredictionResult struct {
 	LLRFace              float64 `json:"llr_face"`
 	LLRBeh               float64 `json:"llr_beh"`
 	LLRQuiz              float64 `json:"llr_quiz"`
+	LLRGaze              float64 `json:"llr_gaze"`
 	RFace                float64 `json:"r_face"`
 	RBeh                 float64 `json:"r_beh"`
 	RQuiz                float64 `json:"r_quiz"`
+	RGaze                float64 `json:"r_gaze"`
 	ContribFace          float64 `json:"contrib_face"`
 	ContribBeh           float64 `json:"contrib_beh"`
 	ContribQuiz          float64 `json:"contrib_quiz"`
+	ContribGaze          float64 `json:"contrib_gaze"`
 	SegmentPrior         float64 `json:"segment_prior"`
 	HighDurationSec      float64 `json:"high_duration_sec"`
 	CooldownRemainingSec float64 `json:"cooldown_remaining_sec"`
@@ -217,6 +232,9 @@ type ConfusionPredictor struct {
 	lrLoaded    bool
 	sessionMu   sync.RWMutex
 	sessions    map[string]SPBEFSessionState
+	// fusionMu guards fusionOverrides (admin SP-BEF overrides, see confusion_settings.go).
+	fusionMu        sync.RWMutex
+	fusionOverrides config.SPBEFOverrides
 }
 
 var (
@@ -383,6 +401,24 @@ func ComputeFrameReliability(facePresentRatio, avgLuminance, headYawAbsDeg, head
 	return round6(rPres * rLuma * rYaw * rPitch * rConf)
 }
 
+// ComputeGazeReliability computes the Reading View gaze reliability r_gaze in [0, 1],
+// matching ml/sp_bef/core.py:compute_gaze_reliability. calibrationErrorNorm is the vertical webcam gaze
+// calibration error divided by the median paragraph height (<= 0.5 keeps full weight, >= 1.5 gives 0).
+func ComputeGazeReliability(calibrationErrorNorm, facePresentRatio, onTextRatio, headYawAbsDeg float64) float64 {
+	if math.IsNaN(calibrationErrorNorm) || calibrationErrorNorm <= 0.0 || math.IsNaN(facePresentRatio) || facePresentRatio <= 0.0 {
+		return 0.0
+	}
+	rCal := clipVal(1.0-math.Max(calibrationErrorNorm-0.5, 0.0), 0.0, 1.0)
+	rPres := clipVal(facePresentRatio, 0.0, 1.0)
+	rText := clipVal(onTextRatio/0.6, 0.0, 1.0)
+	yawPenalty := 1.0
+	if !math.IsNaN(headYawAbsDeg) && !math.IsInf(headYawAbsDeg, 0) {
+		yawPenalty = math.Max(math.Abs(headYawAbsDeg)-15.0, 0.0) / 30.0
+	}
+	rYaw := clipVal(1.0-yawPenalty, 0.0, 1.0)
+	return round6(rCal * rPres * rText * rYaw)
+}
+
 // PredictLinearCalibratedBranch evaluates a standardized linear/logistic branch + isotonic piecewise
 // calibration map and returns (rawProb, calProb, llr), matching ml/sp_bef/core.py:predict_linear_calibrated_branch.
 func PredictLinearCalibratedBranch(features []float64, branchCfg SPBEFBranchConfig) (rawProb, calProb, llr float64) {
@@ -421,8 +457,45 @@ func PredictLinearCalibratedBranch(features []float64, branchCfg SPBEFBranchConf
 	return round6(rawP), round6(calP), round6(llrVal)
 }
 
-// SPBEFStep executes a single forward-filtering step of the SP-BEF 2-State HMM + Hysteresis + Cooldown rule,
-// matching ml/sp_bef/core.py:sp_bef_step.
+// positiveParam returns v unless it is non-finite or <= 0, in which case it returns fallback.
+func positiveParam(v, fallback float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+		return fallback
+	}
+	return v
+}
+
+// weightParam returns v unless it is non-finite or negative (0 disables a branch).
+func weightParam(v, fallback float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return fallback
+	}
+	return v
+}
+
+// SPBEFMildThetaOffRatio places the `mild` floor at this fraction of theta_off, so `mild` covers
+// [0.6 * theta_off, theta_off) and stays reachable for any theta_off (matches ml/sp_bef/core.py).
+const SPBEFMildThetaOffRatio = 0.6
+
+// SPBEFConfusionLevel maps a posterior to unknown | none | mild | moderate | high,
+// matching ml/sp_bef/core.py:confusion_level.
+func SPBEFConfusionLevel(pPost, thetaOn, thetaOff, totalReliability float64) string {
+	switch {
+	case totalReliability <= 1e-6:
+		return "unknown"
+	case pPost >= thetaOn:
+		return "high"
+	case pPost >= thetaOff:
+		return "moderate"
+	case pPost >= SPBEFMildThetaOffRatio*thetaOff:
+		return "mild"
+	default:
+		return "none"
+	}
+}
+
+// SPBEFStep executes a single forward-filtering step of the SP-BEF 2-State HMM + Hysteresis + Cooldown rule
+// without reading-gaze evidence, matching ml/sp_bef/core.py:sp_bef_step.
 func SPBEFStep(
 	prevPosterior, segmentPrior, llrFace, rFace, llrBeh, rBeh, llrQuiz, rQuiz float64,
 	fusionCfg SPBEFFusionConfig,
@@ -430,49 +503,36 @@ func SPBEFStep(
 	prevIntervening bool,
 	cooldownRemainingSec, dtSec float64,
 ) SPBEFStepResult {
-	aKeep := fusionCfg.HMMKeepConfused
-	if aKeep <= 0 {
-		aKeep = 0.78
-	}
-	beta0 := fusionCfg.HMMBeta0
-	if beta0 <= 0 {
-		beta0 = 0.04
-	}
-	beta1 := fusionCfg.HMMBeta1
-	if beta1 <= 0 {
-		beta1 = 0.45
-	}
+	return SPBEFStepWithGaze(prevPosterior, segmentPrior, llrFace, rFace, llrBeh, rBeh, llrQuiz, rQuiz,
+		fusionCfg, prevHighSec, prevIntervening, cooldownRemainingSec, dtSec, 0.0, 0.0)
+}
 
-	wFace := fusionCfg.WFace
-	// A weight of exactly 0 disables a branch (set by the ML pipeline when it has no validated signal).
-	if wFace < 0 {
-		wFace = 0.65
-	}
-	wBeh := fusionCfg.WBeh
-	if wBeh < 0 {
-		wBeh = 0.85
-	}
-	wQuiz := fusionCfg.WQuiz
-	if wQuiz < 0 {
-		wQuiz = 0.90
-	}
+// SPBEFStepWithGaze is SPBEFStep plus the Reading View gaze branch (llr_gaze / r_gaze keyword arguments of
+// ml/sp_bef/core.py:sp_bef_step).
+func SPBEFStepWithGaze(
+	prevPosterior, segmentPrior, llrFace, rFace, llrBeh, rBeh, llrQuiz, rQuiz float64,
+	fusionCfg SPBEFFusionConfig,
+	prevHighSec float64,
+	prevIntervening bool,
+	cooldownRemainingSec, dtSec float64,
+	llrGaze, rGaze float64,
+) SPBEFStepResult {
+	aKeep := positiveParam(fusionCfg.HMMKeepConfused, 0.78)
+	beta0 := positiveParam(fusionCfg.HMMBeta0, 0.04)
+	beta1 := positiveParam(fusionCfg.HMMBeta1, 0.45)
 
-	thetaOn := fusionCfg.ThetaOn
-	if thetaOn <= 0 {
-		thetaOn = 0.62
-	}
-	thetaOff := fusionCfg.ThetaOff
-	if thetaOff <= 0 {
-		thetaOff = 0.42
-	}
-	minHoldSec := fusionCfg.MinHoldSec
-	if minHoldSec <= 0 {
-		minHoldSec = 10.0
-	}
-	cooldownSec := fusionCfg.CooldownSec
-	if cooldownSec <= 0 {
-		cooldownSec = 180.0
-	}
+	// A weight of exactly 0 disables a branch (set by the ML pipeline when it has no validated signal);
+	// negative or non-finite weights fall back to the defaults.
+	wFace := weightParam(fusionCfg.WFace, 0.65)
+	wBeh := weightParam(fusionCfg.WBeh, 0.85)
+	wQuiz := weightParam(fusionCfg.WQuiz, 0.90)
+	// The gaze branch defaults to off until ml/07_train_gaze_branch.py validates it on reading logs.
+	wGaze := weightParam(fusionCfg.WGaze, 0.0)
+
+	thetaOn := positiveParam(fusionCfg.ThetaOn, 0.62)
+	thetaOff := positiveParam(fusionCfg.ThetaOff, 0.42)
+	minHoldSec := positiveParam(fusionCfg.MinHoldSec, 10.0)
+	cooldownSec := positiveParam(fusionCfg.CooldownSec, 180.0)
 
 	piS := clipVal(segmentPrior, 0.02, 0.85)
 	if piS < 0.02 {
@@ -492,6 +552,7 @@ func SPBEFStep(
 	rf := clipVal(rFace, 0.0, 1.0)
 	rb := clipVal(rBeh, 0.0, 1.0)
 	rq := clipVal(rQuiz, 0.0, 1.0)
+	rg := clipVal(rGaze, 0.0, 1.0)
 
 	lf := 0.0
 	if rf > 0 {
@@ -505,12 +566,17 @@ func SPBEFStep(
 	if rq > 0 {
 		lq = clipVal(llrQuiz, -SPBEFLLRClip, SPBEFLLRClip)
 	}
+	lg := 0.0
+	if rg > 0 {
+		lg = clipVal(llrGaze, -SPBEFLLRClip, SPBEFLLRClip)
+	}
 
 	contribFace := round6(rf * wFace * lf)
 	contribBeh := round6(rb * wBeh * lb)
 	contribQuiz := round6(rq * wQuiz * lq)
+	contribGaze := round6(rg * wGaze * lg)
 
-	postLogit := priorLogit + contribFace + contribBeh + contribQuiz
+	postLogit := priorLogit + contribFace + contribBeh + contribQuiz + contribGaze
 	pPost := round6(spBEFSigmoid(postLogit))
 
 	// 3. Hysteresis (theta_on / theta_off) + Cooldown decision rule
@@ -550,19 +616,8 @@ func SPBEFStep(
 		newCooldown = cooldownSec
 	}
 
-	totalReliability := rf + rb + rq
-	var level string
-	if totalReliability <= 1e-6 {
-		level = "unknown"
-	} else if pPost >= thetaOn {
-		level = "high"
-	} else if pPost >= thetaOff {
-		level = "moderate"
-	} else if pPost >= 0.25 {
-		level = "mild"
-	} else {
-		level = "none"
-	}
+	totalReliability := rf + rb + rq + rg
+	level := SPBEFConfusionLevel(pPost, thetaOn, thetaOff, totalReliability)
 
 	return SPBEFStepResult{
 		PriorProb:            round6(pPrior),
@@ -570,12 +625,15 @@ func SPBEFStep(
 		LLRFace:              round6(lf),
 		LLRBeh:               round6(lb),
 		LLRQuiz:              round6(lq),
+		LLRGaze:              round6(lg),
 		RFace:                round6(rf),
 		RBeh:                 round6(rb),
 		RQuiz:                round6(rq),
+		RGaze:                round6(rg),
 		ContribFace:          contribFace,
 		ContribBeh:           contribBeh,
 		ContribQuiz:          contribQuiz,
+		ContribGaze:          contribGaze,
 		SegmentPrior:         round6(piS),
 		HighDurationSec:      round2(highSec),
 		IsConfused:           isConfusedState,
@@ -693,6 +751,8 @@ func ValidateMultimodalFeatures(f MultimodalFeatures) error {
 		f.LLRFace,
 		f.LLRBeh,
 		f.LLRQuiz,
+		f.LLRGaze,
+		f.RGaze,
 		f.FacePresentRatio,
 		f.AvgLuminance,
 		f.HeadYawAbsDeg,
@@ -742,11 +802,13 @@ func ValidateMultimodalFeatures(f MultimodalFeatures) error {
 	if f.ConfusedRatio < 0 || f.ConfusedRatio > 1 || f.FrustratedRatio < 0 || f.FrustratedRatio > 1 {
 		return resCode.ValidationFailed.New("confusedRatio and frustratedRatio must be in [0, 1]")
 	}
-	if f.RFace < 0 || f.RFace > 1 || f.RBeh < 0 || f.RBeh > 1 || f.RQuiz < 0 || f.RQuiz > 1 {
+	if f.RFace < 0 || f.RFace > 1 || f.RBeh < 0 || f.RBeh > 1 || f.RQuiz < 0 || f.RQuiz > 1 || f.RGaze < 0 || f.RGaze > 1 {
 		return resCode.ValidationFailed.New("reliability weights must be in [0, 1]")
 	}
-	if len(f.FaceFeatures) > 0 && len(f.FaceFeatures) != 20 {
-		return resCode.ValidationFailed.New("faceFeatures must have 20 elements")
+	// The face vector length is defined by the loaded sp_bef_params.json (15 raw features in V2.1),
+	// matching the controller-level check in controller/confusion.
+	if n := GetConfusionPredictor().FaceFeatureCount(); len(f.FaceFeatures) > 0 && len(f.FaceFeatures) != n {
+		return resCode.ValidationFailed.New(fmt.Sprintf("faceFeatures must have %d elements", n))
 	}
 	if len(f.BehaviorFeatures) > 0 && len(f.BehaviorFeatures) != 6 {
 		return resCode.ValidationFailed.New("behaviorFeatures must have 6 elements")
@@ -780,8 +842,11 @@ func (p *ConfusionPredictor) FaceFeatureCount() int {
 	return len(p.spBEF.Branches.Face.Coefficients)
 }
 
+// Evaluate runs one SP-BEF step with the shipped fusion parameters plus any admin overrides
+// (SetFusionOverrides). mlThreshold is legacy: it is only used as theta_on when neither the params nor an
+// override provide one.
 func (p *ConfusionPredictor) Evaluate(f MultimodalFeatures, mlThreshold, ruleThreshold float64) ConfusionPredictionResult {
-	fusionCfg := p.spBEF.Fusion
+	fusionCfg := p.EffectiveFusionConfig()
 	if mlThreshold > 0 && fusionCfg.ThetaOn <= 0 {
 		fusionCfg.ThetaOn = mlThreshold
 	}
@@ -925,8 +990,15 @@ func (p *ConfusionPredictor) Evaluate(f MultimodalFeatures, mlThreshold, ruleThr
 		}
 	}
 
-	// 5. Execute SP-BEF forward-filtering step
-	step := SPBEFStep(
+	// 5. Reading View gaze branch: the browser sends the calibrated LLR + reliability (raw gaze never leaves it)
+	var rGaze, llrGaze float64
+	if f.HasGaze && f.RGaze > 0 {
+		rGaze = clipVal(f.RGaze, 0.0, 1.0)
+		llrGaze = clipVal(f.LLRGaze, -SPBEFLLRClip, SPBEFLLRClip)
+	}
+
+	// 6. Execute SP-BEF forward-filtering step
+	step := SPBEFStepWithGaze(
 		prevPosterior,
 		segmentPrior,
 		llrFace,
@@ -940,6 +1012,8 @@ func (p *ConfusionPredictor) Evaluate(f MultimodalFeatures, mlThreshold, ruleThr
 		prevIntervening,
 		cooldownRemainingSec,
 		dtSec,
+		llrGaze,
+		rGaze,
 	)
 
 	if f.SessionID != "" {
@@ -969,12 +1043,15 @@ func (p *ConfusionPredictor) Evaluate(f MultimodalFeatures, mlThreshold, ruleThr
 		LLRFace:              step.LLRFace,
 		LLRBeh:               step.LLRBeh,
 		LLRQuiz:              step.LLRQuiz,
+		LLRGaze:              step.LLRGaze,
 		RFace:                step.RFace,
 		RBeh:                 step.RBeh,
 		RQuiz:                step.RQuiz,
+		RGaze:                step.RGaze,
 		ContribFace:          step.ContribFace,
 		ContribBeh:           step.ContribBeh,
 		ContribQuiz:          step.ContribQuiz,
+		ContribGaze:          step.ContribGaze,
 		SegmentPrior:         step.SegmentPrior,
 		HighDurationSec:      step.HighDurationSec,
 		CooldownRemainingSec: step.CooldownRemainingSec,

@@ -18,7 +18,7 @@ export function AppHeader({
 }) {
   const router = useRouter();
   const pathname = usePathname() || '/';
-  const { mode, setMode, profile, notifications, markAllNotificationsRead } = useAccountStore();
+  const { mode, setMode, profile, notifications, markAllNotificationsRead, logout } = useAccountStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -44,6 +44,13 @@ export function AppHeader({
     const nextLocale = locale === 'en' ? 'vi' : 'en';
     const clean = stripLocale(pathname);
     router.push(withLocale(clean, nextLocale));
+  };
+
+  /** Clears lms_access_token / lms_refresh_token (useAccountStore.logout) and returns to the login page. */
+  const handleSignOut = () => {
+    setProfileOpen(false);
+    logout();
+    router.push(withLocale('/login', locale));
   };
 
   return (
@@ -263,6 +270,10 @@ export function AppHeader({
           </div>
         </DialogBody>
         <DialogActions>
+          <Button variant="ghost" onClick={handleSignOut}>
+            <Icon name="lock" size={16} />
+            <span>{locale === 'en' ? 'Sign out' : 'Đăng xuất'}</span>
+          </Button>
           <Button variant="outline" onClick={() => setProfileOpen(false)}>
             Đóng
           </Button>

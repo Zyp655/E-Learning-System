@@ -9,6 +9,7 @@ import {
   Button,
   ButtonLink,
   Card,
+  FieldError,
   ProgressBar,
   SellerInfo,
   Textarea,
@@ -22,7 +23,7 @@ import {
   MOCK_ROADMAP_NODES,
   MOCK_SPECIALIZATIONS,
 } from '@/api/mockData';
-import { lmsApi } from '@/api';
+import { describeApiError, lmsApi } from '@/api';
 
 export default function CourseDetailPage({
   params,
@@ -44,16 +45,21 @@ export default function CourseDetailPage({
   const [reviewsList, setReviewsList] = useState(course.reviews);
   const [resettingDeadlines, setResettingDeadlines] = useState(false);
   const [deadlineMessage, setDeadlineMessage] = useState<string | null>(null);
+  const [deadlineError, setDeadlineError] = useState<string | null>(null);
   const [deadlineLabel, setDeadlineLabel] = useState(
     course.nextDeadlineDate || 'Chủ nhật tuần này · 23:59',
   );
 
   const handleResetDeadlines = async () => {
     setResettingDeadlines(true);
+    setDeadlineError(null);
     try {
       const res = await lmsApi.resetCourseDeadlines(course.id);
       setDeadlineMessage(res.message);
-      setDeadlineLabel(res.newDeadlineDate);
+      if (res.newDeadlineDate) setDeadlineLabel(res.newDeadlineDate);
+    } catch (err) {
+      setDeadlineMessage(null);
+      setDeadlineError(`Không dời được hạn nộp: ${describeApiError(err)}`);
     } finally {
       setResettingDeadlines(false);
     }
@@ -155,6 +161,7 @@ export default function CourseDetailPage({
                   ✓ {deadlineMessage}
                 </div>
               )}
+              <FieldError>{deadlineError}</FieldError>
             </div>
 
             <div className="rounded-xl bg-muted p-4 space-y-3 lg:col-span-4">

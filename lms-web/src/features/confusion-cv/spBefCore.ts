@@ -49,6 +49,18 @@ export const QUIZ_FEATURES = [
   'attempt_count',
 ] as const;
 
+// Reading-gaze branch (webcam iris tracking in the Reading View), one window per paragraph.
+// Same order and meaning as GAZE_FEATURES in ml/sp_bef/core.py; no feature relies on vertical line
+// assignment or fixation durations, which webcam accuracy (~4 deg) and frame rate (~30 fps) cannot support.
+export const GAZE_FEATURES = [
+  'dwell_ratio',
+  'reread_count',
+  'para_regression_rate',
+  'sweep_ratio',
+  'gaze_transition_entropy',
+  'saccade_rate',
+] as const;
+
 export interface BranchConfig {
   feature_names?: string[];
   scaler_mean: number[];
@@ -58,6 +70,8 @@ export interface BranchConfig {
   base_rate: number;
   isotonic_xp?: number[];
   isotonic_fp?: number[];
+  trained?: boolean;
+  enabled?: boolean;
 }
 
 export interface FusionConfig {
@@ -67,6 +81,7 @@ export interface FusionConfig {
   w_face?: number;
   w_beh?: number;
   w_quiz?: number;
+  w_gaze?: number;
   theta_on?: number;
   theta_off?: number;
   min_hold_sec?: number;
@@ -79,6 +94,8 @@ export interface SegmentPriorConfig {
   mooccubex_bin_priors_20: number[];
   density_to_prior_intercept: number;
   density_to_prior_slope: number;
+  // Reading View: prior = cold_start_prior + slope * (text difficulty - 0.5). Absent / 0 until validated.
+  reading_difficulty_slope?: number;
 }
 
 export interface SpBefParams {
@@ -91,6 +108,7 @@ export interface SpBefParams {
     face: BranchConfig;
     behavior: BranchConfig;
     quiz: BranchConfig;
+    gaze?: BranchConfig;
   };
 }
 
@@ -139,12 +157,15 @@ export interface SpBefStepResult {
   llr_face: number;
   llr_beh: number;
   llr_quiz: number;
+  llr_gaze: number;
   r_face: number;
   r_beh: number;
   r_quiz: number;
+  r_gaze: number;
   contrib_face: number;
   contrib_beh: number;
   contrib_quiz: number;
+  contrib_gaze: number;
   segment_prior: number;
   high_duration_sec: number;
   is_confused: boolean;
@@ -180,6 +201,10 @@ export interface SpBefStepInputObject {
   cooldown_remaining_sec?: number;
   dtSec?: number;
   dt_sec?: number;
+  llrGaze?: number;
+  llr_gaze?: number;
+  rGaze?: number;
+  r_gaze?: number;
 }
 
 function roundTo(val: number, decimals: number): number {
@@ -200,8 +225,46 @@ export function sigmoid(z: number): number {
 }
 
 export function logit(p: number): number {
-  const pC = clipVal(p, 1e-4, 1.0 - 1e-4);
+  // clipVal maps NaN/Inf to 0.0, so clamp again to keep log() finite (matches Go spBEFLogit).
+  const pC = Math.max(1e-4, clipVal(p, 1e-4, 1.0 - 1e-4));
   return Math.log(pC / (1.0 - pC));
+}
+
+/** Non-finite or negative values become `fallback` (Go reference: sanitized dt / prevHigh / cooldown). */
+function finiteNonNegative(x: unknown, fallback: number): number {
+  const v = Number(x);
+  return Number.isFinite(v) && v >= 0 ? v : fallback;
+}
+
+/** Missing, non-finite or <= 0 parameters fall back to `fallback` (Go reference: SPBEFStepWithGaze). */
+function positiveParam(x: unknown, fallback: number): number {
+  const v = Number(x ?? fallback);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}
+
+/** A weight of exactly 0 disables a branch; negative or non-finite weights fall back to `fallback`. */
+function weightParam(x: unknown, fallback: number): number {
+  const v = Number(x ?? fallback);
+  return Number.isFinite(v) && v >= 0 ? v : fallback;
+}
+
+/**
+ * `mild` covers [MILD_THETA_OFF_RATIO * thetaOff, thetaOff): elevated but below the hysteresis band.
+ * Matches ml/sp_bef/core.py:confusion_level and Go spBEFConfusionLevel.
+ */
+export const MILD_THETA_OFF_RATIO = 0.6;
+
+export function confusionLevel(
+  pPost: number,
+  thetaOn: number,
+  thetaOff: number,
+  totalReliability: number,
+): SpBefLevel {
+  if (totalReliability <= 1e-6) return 'unknown';
+  if (pPost >= thetaOn) return 'high';
+  if (pPost >= thetaOff) return 'moderate';
+  if (pPost >= MILD_THETA_OFF_RATIO * thetaOff) return 'mild';
+  return 'none';
 }
 
 /**
@@ -211,6 +274,9 @@ export function logit(p: number): number {
 export function piecewiseLinearInterp(x: number, xp: number[], fp: number[]): number {
   if (!xp || !fp || xp.length === 0 || fp.length === 0 || xp.length !== fp.length) {
     return clipVal(x, 1e-4, 1.0 - 1e-4);
+  }
+  if (Number.isNaN(x)) {
+    return Number(fp[0]);
   }
   if (x <= xp[0]) {
     return Number(fp[0]);
@@ -259,6 +325,32 @@ export function computeFrameReliability(
 }
 
 /**
+ * Reading-gaze reliability r_gaze in [0, 1], matching ml/sp_bef/core.py:compute_gaze_reliability.
+ * `calibrationErrorNorm` is the vertical calibration validation error divided by the median paragraph height
+ * (<= 0.5 keeps full weight, >= 1.5 gives 0). Returns 0.0 when uncalibrated or no face.
+ */
+export function computeGazeReliability(
+  calibrationErrorNorm: number,
+  facePresentRatio: number,
+  onTextRatio: number,
+  headYawAbsDeg: number,
+): number {
+  if (
+    Number.isNaN(calibrationErrorNorm) ||
+    calibrationErrorNorm <= 0.0 ||
+    Number.isNaN(facePresentRatio) ||
+    facePresentRatio <= 0.0
+  ) {
+    return 0.0;
+  }
+  const rCal = clipVal(1.0 - Math.max(calibrationErrorNorm - 0.5, 0.0), 0.0, 1.0);
+  const rPres = clipVal(facePresentRatio, 0.0, 1.0);
+  const rText = clipVal(onTextRatio / 0.6, 0.0, 1.0);
+  const rYaw = clipVal(1.0 - Math.max(Math.abs(headYawAbsDeg) - 15.0, 0.0) / 30.0, 0.0, 1.0);
+  return roundTo(rCal * rPres * rText * rYaw, 6);
+}
+
+/**
  * Evaluates a standardized linear/logistic branch + isotonic piecewise calibration map,
  * and returns { rawProb, calProb, llr }.
  */
@@ -278,7 +370,7 @@ export function predictLinearCalibratedBranch(
     const x = features[i];
     const val = typeof x !== 'number' || Number.isNaN(x) || !Number.isFinite(x) ? 0.0 : Number(x);
     const s = Number(scale[i]);
-    const denom = Math.abs(s) > 1e-9 ? s : 1.0;
+    const denom = Number.isFinite(s) && Math.abs(s) > 1e-9 ? s : 1.0;
     z += ((val - Number(mean[i])) / denom) * Number(coef[i]);
   }
 
@@ -314,6 +406,8 @@ export function spBefStep(
   prevIntervening = false,
   cooldownRemainingSec = 0.0,
   dtSec = 5.0,
+  llrGaze = 0.0,
+  rGaze = 0.0,
 ): SpBefStepResult {
   if (typeof prevPosteriorOrObj === 'object' && prevPosteriorOrObj !== null) {
     const o = prevPosteriorOrObj;
@@ -331,6 +425,8 @@ export function spBefStep(
       o.prevIntervening ?? o.prev_intervening ?? false,
       o.cooldownRemainingSec ?? o.cooldown_remaining_sec ?? 0.0,
       o.dtSec ?? o.dt_sec ?? 5.0,
+      o.llrGaze ?? o.llr_gaze ?? 0.0,
+      o.rGaze ?? o.r_gaze ?? 0.0,
     );
   }
 
@@ -344,21 +440,24 @@ export function spBefStep(
   const r_quiz = rQuiz ?? 0.0;
   const cfg = fusionCfg ?? SP_BEF_PARAMS.fusion;
 
-  const aKeep = Number(cfg.hmm_keep_confused ?? 0.78);
-  const beta0 = Number(cfg.hmm_beta0 ?? 0.04);
-  const beta1 = Number(cfg.hmm_beta1 ?? 0.45);
+  const aKeep = positiveParam(cfg.hmm_keep_confused, 0.78);
+  const beta0 = positiveParam(cfg.hmm_beta0, 0.04);
+  const beta1 = positiveParam(cfg.hmm_beta1, 0.45);
 
-  const wFace = Number(cfg.w_face ?? 0.65);
-  const wBeh = Number(cfg.w_beh ?? 0.85);
-  const wQuiz = Number(cfg.w_quiz ?? 0.90);
+  const wFace = weightParam(cfg.w_face, 0.65);
+  const wBeh = weightParam(cfg.w_beh, 0.85);
+  const wQuiz = weightParam(cfg.w_quiz, 0.90);
+  // The gaze branch stays off until ml/07_train_gaze_branch.py validates it on labelled reading logs.
+  const wGaze = weightParam(cfg.w_gaze, 0.0);
 
-  const thetaOn = Number(cfg.theta_on ?? 0.62);
-  const thetaOff = Number(cfg.theta_off ?? 0.42);
-  const minHoldSec = Number(cfg.min_hold_sec ?? 10.0);
-  const cooldownSec = Number(cfg.cooldown_sec ?? 180.0);
+  const thetaOn = positiveParam(cfg.theta_on, 0.62);
+  const thetaOff = positiveParam(cfg.theta_off, 0.42);
+  const minHoldSec = positiveParam(cfg.min_hold_sec, 10.0);
+  const cooldownSec = positiveParam(cfg.cooldown_sec, 180.0);
 
-  const piS = clipVal(segment_prior, 0.02, 0.85);
-  const pPrev = clipVal(prev_posterior, 0.01, 0.99);
+  // clipVal maps NaN/Inf to 0.0; clamp again so the result stays inside the range (matches Go).
+  const piS = Math.max(0.02, clipVal(segment_prior, 0.02, 0.85));
+  const pPrev = Math.max(0.01, clipVal(prev_posterior, 0.01, 0.99));
 
   // 1. HMM 2-state prior transition modulated by segment prior pi_s (C3 + C5)
   const betaPi = clipVal(beta0 + beta1 * piS, 0.02, 0.65);
@@ -369,27 +468,34 @@ export function spBefStep(
   const rf = clipVal(r_face, 0.0, 1.0);
   const rb = clipVal(r_beh, 0.0, 1.0);
   const rq = clipVal(r_quiz, 0.0, 1.0);
+  const rg = clipVal(rGaze, 0.0, 1.0);
 
   const lf = rf > 0 ? clipVal(llr_face, -LLR_CLIP, LLR_CLIP) : 0.0;
   const lb = rb > 0 ? clipVal(llr_beh, -LLR_CLIP, LLR_CLIP) : 0.0;
   const lq = rq > 0 ? clipVal(llr_quiz, -LLR_CLIP, LLR_CLIP) : 0.0;
+  const lg = rg > 0 ? clipVal(llrGaze, -LLR_CLIP, LLR_CLIP) : 0.0;
 
   const contribFace = roundTo(rf * wFace * lf, 6);
   const contribBeh = roundTo(rb * wBeh * lb, 6);
   const contribQuiz = roundTo(rq * wQuiz * lq, 6);
+  const contribGaze = roundTo(rg * wGaze * lg, 6);
 
-  const postLogit = priorLogit + contribFace + contribBeh + contribQuiz;
+  const postLogit = priorLogit + contribFace + contribBeh + contribQuiz + contribGaze;
   const pPost = roundTo(sigmoid(postLogit), 6);
 
   // 3. Hysteresis (theta_on / theta_off) + Cooldown decision rule
-  let newCooldown = Math.max(0.0, Number(cooldownRemainingSec) - Number(dtSec));
+  // NaN / Inf / negative timing inputs are treated as 0 (matches Go SPBEFStepWithGaze).
+  const safeCooldown = finiteNonNegative(cooldownRemainingSec, 0.0);
+  const safeDt = finiteNonNegative(dtSec, 0.0);
+  const safePrevHigh = finiteNonNegative(prevHighSec, 0.0);
+  let newCooldown = Math.max(0.0, safeCooldown - safeDt);
   let highSec: number;
   if (pPost >= thetaOn) {
-    highSec = Number(prevHighSec) + Number(dtSec);
+    highSec = safePrevHigh + safeDt;
   } else if (pPost < thetaOff) {
     highSec = 0.0;
   } else {
-    highSec = Number(prevHighSec);
+    highSec = safePrevHigh;
   }
 
   let isConfusedState: boolean;
@@ -405,19 +511,8 @@ export function spBefStep(
     newCooldown = cooldownSec;
   }
 
-  const totalReliability = rf + rb + rq;
-  let level: SpBefLevel;
-  if (totalReliability <= 1e-6) {
-    level = 'unknown';
-  } else if (pPost >= thetaOn) {
-    level = 'high';
-  } else if (pPost >= thetaOff) {
-    level = 'moderate';
-  } else if (pPost >= 0.25) {
-    level = 'mild';
-  } else {
-    level = 'none';
-  }
+  const totalReliability = rf + rb + rq + rg;
+  const level = confusionLevel(pPost, thetaOn, thetaOff, totalReliability);
 
   return {
     prior_prob: roundTo(pPrior, 6),
@@ -425,12 +520,15 @@ export function spBefStep(
     llr_face: roundTo(lf, 6),
     llr_beh: roundTo(lb, 6),
     llr_quiz: roundTo(lq, 6),
+    llr_gaze: roundTo(lg, 6),
     r_face: roundTo(rf, 6),
     r_beh: roundTo(rb, 6),
     r_quiz: roundTo(rq, 6),
+    r_gaze: roundTo(rg, 6),
     contrib_face: contribFace,
     contrib_beh: contribBeh,
     contrib_quiz: contribQuiz,
+    contrib_gaze: contribGaze,
     segment_prior: roundTo(piS, 6),
     high_duration_sec: roundTo(highSec, 2),
     is_confused: Boolean(isConfusedState),
@@ -759,4 +857,17 @@ export function getSegmentPriorForTimestamp(videoTimestampSec: number): number {
     Math.max(0, Math.floor(videoTimestampSec / Math.max(1, cfg.bin_duration_sec))),
   );
   return Number(bins[binIdx] ?? cfg.cold_start_prior);
+}
+
+/**
+ * C3 Segment Prior pi_s for a Reading View paragraph from its text-difficulty score in [0, 1].
+ * Stays at the cold-start prior until `segment_prior.reading_difficulty_slope` is fitted on reading logs.
+ */
+export function getSegmentPriorForParagraph(difficulty: number): number {
+  const cfg = SP_BEF_PARAMS.segment_prior;
+  const slope = Number(cfg.reading_difficulty_slope ?? 0);
+  if (!Number.isFinite(difficulty) || slope === 0) {
+    return cfg.cold_start_prior;
+  }
+  return clipVal(cfg.cold_start_prior + slope * (difficulty - 0.5), 0.02, 0.85);
 }

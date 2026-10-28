@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import { clearAuthTokens } from '@/api/client';
 import { MOCK_STUDENT_PROFILE } from '@/api/mockData';
 import type { StudentAcademicProfile, UserRole } from '@/api/types';
 
@@ -25,6 +26,8 @@ interface AccountState {
   };
   notifications: SmartNotificationItem[];
   setMode: (mode: 'student' | 'teacher') => void;
+  /** Signs out: clears lms_access_token / lms_refresh_token and returns to the student workspace. */
+  logout: () => void;
   setFacePoseEmbedding: (pose: 'front' | 'left' | 'right', vec: number[]) => void;
   resetFaceEmbeddings: () => void;
   setCameraConsent: (granted: boolean) => void;
@@ -83,6 +86,10 @@ export const useAccountStore = create<AccountState>((set) => ({
     },
   ],
   setMode: (mode) => set({ mode, role: mode }),
+  logout: () => {
+    clearAuthTokens();
+    set({ mode: 'student', role: 'student' });
+  },
   setFacePoseEmbedding: (pose, vec) =>
     set((state) => {
       const next = { ...state.faceEmbeddings, [pose]: vec };

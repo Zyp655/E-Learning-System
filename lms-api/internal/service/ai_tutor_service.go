@@ -550,10 +550,10 @@ func (s *AITutorService) SummarizeLesson(ctx context.Context, lessonID int64) (s
 ## 2. Bốn Trường hợp Mất cân bằng & Phép quay ($O(1)$)
 | Trường hợp | Vị trí chèn gây lệch | Phép quay khôi phục |
 |---|---|---|
-| **Left-Left (LL)** | Trái của con Trái | Quay Phải đơn (` + "`Right Rotate`" + `) ` + "`[06:15]`" + ` |
-| **Right-Right (RR)** | Phải của con Phải | Quay Trái đơn (` + "`Left Rotate`" + `) ` + "`[08:20]`" + ` |
-| **Left-Right (LR)** | Phải của con Trái | Quay Trái nút con $\rightarrow$ Quay Phải nút cha ` + "`[09:40]`" + ` |
-| **Right-Left (RL)** | Trái của con Phải | Quay Phải nút con $\rightarrow$ Quay Trái nút cha ` + "`[11:10]`" + ` |
+| **Left-Left (LL)** | Trái của con Trái | Quay Phải đơn (`+"`Right Rotate`"+`) `+"`[06:15]`"+` |
+| **Right-Right (RR)** | Phải của con Phải | Quay Trái đơn (`+"`Left Rotate`"+`) `+"`[08:20]`"+` |
+| **Left-Right (LR)** | Phải của con Trái | Quay Trái nút con $\rightarrow$ Quay Phải nút cha `+"`[09:40]`"+` |
+| **Right-Left (RL)** | Trái của con Phải | Quay Phải nút con $\rightarrow$ Quay Trái nút cha `+"`[11:10]`"+` |
 
 ## 3. Ghi nhớ Nhanh khi Thi & Phỏng vấn
 - Luôn cập nhật chiều cao `+"`height`"+` của nút con bị hạ thấp trước, nút cha mới sau.
